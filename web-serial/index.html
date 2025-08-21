@@ -1080,6 +1080,8 @@
         
         // 监听语言变更事件
         window.addEventListener('languageChanged', function(event) {
+            const currentLang = event.detail.language;
+            updateLanguageDisplay(currentLang);  // 更新语言选择器显示
             if (window.serialTerminal && typeof window.serialTerminal.updateSystemInfoDisplay === 'function') {
                 window.serialTerminal.updateSystemInfoDisplay();
             }
