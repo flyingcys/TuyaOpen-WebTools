@@ -1,12 +1,36 @@
 /**
  * T5AI芯片下载器 - 基于成功测试的逻辑实现
  * 完全按照t5-flash-test.html中调试成功的协议逻辑
+ * 
+ * 增强功能:
+ * - 集成平台检测和多策略复位功能
+ * - 解决Ubuntu系统上T5AI复位问题
+ * - 保持向后兼容性
  */
+
+// 导入增强功能模块
+let PlatformDetector, ResetStrategyManager;
+if (typeof require !== 'undefined') {
+    try {
+        PlatformDetector = require('../utils/platform-detector.js');
+        ResetStrategyManager = require('../utils/reset-strategy-manager.js');
+    } catch (e) {
+        // 如果模块不存在，使用原始功能
+        console.warn('Enhanced reset modules not available, using original functionality');
+    }
+} else if (typeof window !== 'undefined') {
+    // 浏览器环境
+    PlatformDetector = window.PlatformDetector;
+    ResetStrategyManager = window.ResetStrategyManager;
+}
 
 class T5Downloader extends BaseDownloader {
     constructor(serialPort, debugCallback) {
         super(serialPort, debugCallback);
         this.chipName = 'T5AI';
+        
+        // 增强功能初始化
+        this.initializeEnhancedFeatures();
         
         // Flash芯片数据库 - 完全按照测试版本的数据
         this.flashDatabase = {
@@ -55,6 +79,63 @@ class T5Downloader extends BaseDownloader {
         this.chipId = null;
         this.flashId = null;
         this.flashConfig = null;
+    }
+
+    /**
+     * 初始化增强功能
+     */
+    initializeEnhancedFeatures() {
+        // 检查是否有增强功能模块
+        this.hasEnhancedFeatures = !!(PlatformDetector && ResetStrategyManager);
+        
+        if (this.hasEnhancedFeatures) {
+            // 平台检测和配置
+            this.platform = PlatformDetector.detectPlatform();
+            this.platformConfig = PlatformDetector.getPlatformConfig(this.platform);
+            this.platformInfo = PlatformDetector.getPlatformInfo();
+            
+            // 复位策略管理器（延迟初始化）
+            this.resetStrategyManager = null;
+            
+            // 增强功能标志
+            this.enhancedResetEnabled = true;
+            this.resetAttemptHistory = [];
+            
+            // 初始化日志
+            this.infoLog(`检测到平台: ${this.platform}`);
+            this.infoLog(`使用平台配置: ${this.platformConfig.description}`);
+            this.debugLog(`增强复位功能已启用`);
+        } else {
+            // 使用默认配置
+            this.platform = 'unknown';
+            this.platformConfig = {
+                resetDelay: 300,
+                recoveryDelay: 4,
+                linkCheckDelay: 1,
+                maxRetries: 100,
+                preferredStrategy: 'original',
+                description: '默认配置（增强功能不可用）'
+            };
+            this.hasEnhancedFeatures = false;
+            this.enhancedResetEnabled = false;
+            this.resetAttemptHistory = [];
+            
+            this.debugLog('使用原始T5AI复位功能');
+        }
+    }
+
+    /**
+     * 初始化复位策略管理器
+     */
+    initializeResetStrategyManager() {
+        if (this.hasEnhancedFeatures && !this.resetStrategyManager) {
+            this.resetStrategyManager = new ResetStrategyManager(
+                this.port, 
+                this.platformConfig, 
+                this.debug.bind(this)
+            );
+            this.debugLog('复位策略管理器初始化完成');
+        }
     }
 
     /**
@@ -263,55 +344,165 @@ class T5Downloader extends BaseDownloader {
     }
 
     /**
-     * 步骤1：获取总线控制权 - 完全按照Python的get_bus逻辑
-     * Python: max_try_count = 100, do_link_check_ex(max_try_count=60)
+     * 步骤1：获取总线控制权 - 集成增强复位功能
+     * 保持向后兼容性，同时添加平台检测和多策略复位
      */
     async getBusControl() {
         this.mainLog('=== 步骤1: 获取总线控制权 ===');
         
-        const maxTryCount = 100; // 与Python保持一致
+        if (this.hasEnhancedFeatures) {
+            this.infoLog(`平台: ${this.platform}, 配置: ${this.platformConfig.description}`);
+            // 初始化复位策略管理器
+            this.initializeResetStrategyManager();
+        }
+        
+        const maxTryCount = this.platformConfig.maxRetries;
+        this.debugLog(`最大尝试次数: ${maxTryCount}`);
+        
         for (let attempt = 1; attempt <= maxTryCount && !this.stopFlag; attempt++) {
-            if (attempt % 10 === 1) {  // 每10次尝试输出一次日志
-                this.commLog(`尝试 ${attempt}/${maxTryCount}`);
+            if (attempt % 10 === 1) {
+                const platformInfo = this.hasEnhancedFeatures ? ` (${this.platform}平台)` : '';
+                this.commLog(`尝试 ${attempt}/${maxTryCount}${platformInfo}`);
             }
             
-            // 复位设备 - 与Python do_reset一致
-            await this.port.setSignals({ dataTerminalReady: false, requestToSend: true });
-            await new Promise(resolve => setTimeout(resolve, 300)); // Python: time.sleep(0.3)
-            await this.port.setSignals({ requestToSend: false });
-            await new Promise(resolve => setTimeout(resolve, 4)); // Python: time.sleep(0.004)
+            // 记录尝试开始时间
+            const attemptStart = Date.now();
             
-            // do_link_check_ex - 与Python一致，最多60次
-            const linkCheckSuccess = await this.doLinkCheckEx(60);
-            if (linkCheckSuccess) {
-                this.mainLog(`✅ 第${attempt}次尝试成功获取总线控制权`);
-                return true;
+            try {
+                // 执行复位操作
+                const resetSuccess = await this.executeReset(attempt);
+                
+                if (resetSuccess) {
+                    // 执行LinkCheck验证
+                    const linkCheckSuccess = await this.doLinkCheckEx(60);
+                    
+                    if (linkCheckSuccess) {
+                        const attemptDuration = Date.now() - attemptStart;
+                        this.mainLog(`✅ 第${attempt}次尝试成功获取总线控制权 (耗时: ${attemptDuration}ms)`);
+                        
+                        // 记录成功信息
+                        this.recordResetAttempt(attempt, true, attemptDuration, null);
+                        
+                        // 显示成功的策略信息
+                        if (this.hasEnhancedFeatures && this.resetStrategyManager) {
+                            const successfulStrategy = this.resetStrategyManager.getLastSuccessfulStrategy();
+                            if (successfulStrategy) {
+                                this.infoLog(`成功策略: ${successfulStrategy}`);
+                            }
+                        }
+                        
+                        return true;
+                    } else {
+                        this.debugLog(`第${attempt}次尝试: 复位成功但LinkCheck失败`);
+                    }
+                } else {
+                    this.debugLog(`第${attempt}次尝试: 复位失败`);
+                }
+                
+            } catch (error) {
+                const attemptDuration = Date.now() - attemptStart;
+                this.warningLog(`第${attempt}次尝试失败: ${error.message}`);
+                this.recordResetAttempt(attempt, false, attemptDuration, error.message);
+            }
+            
+            // 如果不是最后一次尝试，等待一段时间再重试
+            if (attempt < maxTryCount && !this.stopFlag) {
+                const retryDelay = Math.min(100 + attempt * 10, 500); // 递增延迟，最大500ms
+                await new Promise(resolve => setTimeout(resolve, retryDelay));
             }
         }
         
+        // 所有尝试都失败了
+        this.errorLog('所有复位策略都失败了');
+        this.showResetFailureGuidance();
         return false;
     }
 
     /**
-     * do_link_check_ex - 完全按照Python版本实现
-     * Python: max_try_count=60, timeout_sec=0.001
+     * 执行复位操作 - 根据是否有增强功能选择不同的复位方法
+     */
+    async executeReset(attempt) {
+        if (this.hasEnhancedFeatures && this.enhancedResetEnabled) {
+            return await this.executeEnhancedReset(attempt);
+        } else {
+            return await this.executeOriginalReset();
+        }
+    }
+
+    /**
+     * 执行增强复位策略
+     */
+    async executeEnhancedReset(attempt) {
+        this.debugLog(`执行增强复位策略 (尝试 ${attempt})`);
+        
+        try {
+            // 使用复位策略管理器执行复位
+            const success = await this.resetStrategyManager.executeReset();
+            
+            if (success) {
+                this.debugLog('增强复位策略执行成功');
+                return true;
+            } else {
+                this.debugLog('增强复位策略执行失败，尝试原始复位方法');
+                // 如果增强策略失败，回退到原始方法
+                return await this.executeOriginalReset();
+            }
+            
+        } catch (error) {
+            this.warningLog(`增强复位策略异常: ${error.message}`);
+            // 异常时回退到原始方法
+            return await this.executeOriginalReset();
+        }
+    }
+
+    /**
+     * 执行原始复位方法（向后兼容）
+     */
+    async executeOriginalReset() {
+        this.debugLog('执行原始T5AI复位方法');
+        
+        try {
+            // 原始复位逻辑：DTR=false, RTS=true -> RTS=false
+            await this.port.setSignals({ dataTerminalReady: false, requestToSend: true });
+            await new Promise(resolve => setTimeout(resolve, this.platformConfig.resetDelay));
+            await this.port.setSignals({ requestToSend: false });
+            await new Promise(resolve => setTimeout(resolve, this.platformConfig.recoveryDelay));
+            
+            this.debugLog('原始复位方法执行完成');
+            return true;
+            
+        } catch (error) {
+            this.warningLog(`原始复位方法失败: ${error.message}`);
+            return false;
+        }
+    }
+
+    /**
+     * do_link_check_ex - 增强版LinkCheck，使用平台特定的延迟参数
+     * 保持向后兼容性，同时优化不同平台的性能
      */
     async doLinkCheckEx(maxTryCount = 60) {
+        const linkCheckDelay = this.platformConfig.linkCheckDelay;
+        this.debugLog(`执行LinkCheck验证，最大尝试${maxTryCount}次，延迟${linkCheckDelay}ms`);
+        
         for (let cnt = 0; cnt < maxTryCount && !this.stopFlag; cnt++) {
-                await this.clearBuffer();
-                await this.sendCommand([0x01, 0xE0, 0xFC, 0x01, 0x00], 'LinkCheck');
-                
-            // Python使用0.001秒超时，即1毫秒
-            const response = await this.receiveResponse(8, 1);
-                if (response.length >= 8) {
-                    const r = response.slice(0, 8);
-                    if (r[0] === 0x04 && r[1] === 0x0E && r[2] === 0x05 && 
-                        r[3] === 0x01 && r[4] === 0xE0 && r[5] === 0xFC && 
-                        r[6] === 0x01 && r[7] === 0x00) {
-                        return true;
-                    }
+            await this.clearBuffer();
+            await this.sendCommand([0x01, 0xE0, 0xFC, 0x01, 0x00], 'LinkCheck');
+            
+            // 使用平台特定的超时时间
+            const response = await this.receiveResponse(8, linkCheckDelay);
+            if (response.length >= 8) {
+                const r = response.slice(0, 8);
+                if (r[0] === 0x04 && r[1] === 0x0E && r[2] === 0x05 && 
+                    r[3] === 0x01 && r[4] === 0xE0 && r[5] === 0xFC && 
+                    r[6] === 0x01 && r[7] === 0x00) {
+                    this.debugLog(`LinkCheck成功 (尝试${cnt + 1}次)`);
+                    return true;
                 }
             }
+        }
+        
+        this.debugLog(`LinkCheck失败 (尝试${maxTryCount}次)`);
         return false;
     }
 
@@ -2397,9 +2588,148 @@ class T5Downloader extends BaseDownloader {
         }
         // ... existing code ...
     }
+
+    /**
+     * 记录复位尝试历史
+     */
+    recordResetAttempt(attempt, success, duration, error) {
+        const record = {
+            attempt: attempt,
+            success: success,
+            duration: duration,
+            error: error,
+            platform: this.platform,
+            strategy: this.hasEnhancedFeatures && this.resetStrategyManager ? 
+                     this.resetStrategyManager.getLastSuccessfulStrategy() : 'original',
+            timestamp: new Date().toISOString()
+        };
+        
+        this.resetAttemptHistory.push(record);
+        
+        // 保持历史记录不超过20条
+        if (this.resetAttemptHistory.length > 20) {
+            this.resetAttemptHistory.shift();
+        }
+        
+        this.debugLog(`记录复位尝试: ${JSON.stringify(record)}`);
+    }
+
+    /**
+     * 显示复位失败的故障排除指导
+     */
+    showResetFailureGuidance() {
+        if (this.hasEnhancedFeatures) {
+            const errorMessages = PlatformDetector.getPlatformErrorMessages(this.platform);
+            
+            this.errorLog('=== 复位失败故障排除指导 ===');
+            this.errorLog(errorMessages.resetFailed);
+            
+            // 显示尝试统计
+            if (this.resetStrategyManager) {
+                const stats = this.resetStrategyManager.getStatistics();
+                this.infoLog(`复位尝试统计: 总计${stats.totalAttempts}次, 成功${stats.successCount}次, 失败${stats.failureCount}次`);
+                
+                if (Object.keys(stats.strategies).length > 0) {
+                    this.infoLog('各策略统计:');
+                    Object.keys(stats.strategies).forEach(strategy => {
+                        const strategyStats = stats.strategies[strategy];
+                        this.infoLog(`- ${strategy}: 成功${strategyStats.success}次, 失败${strategyStats.failure}次`);
+                    });
+                }
+            }
+            
+            // 平台特定的额外建议
+            if (this.platform === 'linux') {
+                this.errorLog('\nLinux系统额外建议:');
+                this.errorLog('1. 检查用户是否在dialout组: groups $USER');
+                this.errorLog('2. 添加用户到dialout组: sudo usermod -a -G dialout $USER');
+                this.errorLog('3. 检查设备权限: ls -l /dev/ttyUSB* /dev/ttyACM*');
+                this.errorLog('4. 查看内核日志: dmesg | tail -20');
+            }
+        } else {
+            // 原始错误处理
+            this.errorLog('复位失败，请检查设备连接和驱动程序');
+        }
+    }
+
+    /**
+     * 获取平台信息
+     */
+    getPlatformInfo() {
+        if (this.hasEnhancedFeatures) {
+            return {
+                platform: this.platform,
+                config: this.platformConfig,
+                info: this.platformInfo,
+                enhancedFeatures: true
+            };
+        } else {
+            return {
+                platform: 'unknown',
+                config: this.platformConfig,
+                enhancedFeatures: false
+            };
+        }
+    }
+
+    /**
+     * 获取复位尝试历史
+     */
+    getResetAttemptHistory() {
+        return [...this.resetAttemptHistory];
+    }
+
+    /**
+     * 获取复位策略统计
+     */
+    getResetStrategyStatistics() {
+        if (this.hasEnhancedFeatures && this.resetStrategyManager) {
+            return this.resetStrategyManager.getStatistics();
+        }
+        return null;
+    }
+
+    /**
+     * 启用/禁用增强复位功能
+     */
+    setEnhancedResetEnabled(enabled) {
+        if (this.hasEnhancedFeatures) {
+            this.enhancedResetEnabled = enabled;
+            this.infoLog(`增强复位功能: ${enabled ? '启用' : '禁用'}`);
+        } else {
+            this.warningLog('增强复位功能不可用（缺少依赖模块）');
+        }
+    }
+
+    /**
+     * 清除复位历史记录
+     */
+    clearResetHistory() {
+        this.resetAttemptHistory = [];
+        if (this.hasEnhancedFeatures && this.resetStrategyManager) {
+            this.resetStrategyManager.clearHistory();
+        }
+        this.infoLog('已清除复位历史记录');
+    }
+
+    /**
+     * 获取诊断信息
+     */
+    getDiagnosticInfo() {
+        const diagnostics = {
+            platform: this.getPlatformInfo(),
+            resetHistory: this.getResetAttemptHistory(),
+            strategyStats: this.getResetStrategyStatistics(),
+            enhancedResetEnabled: this.enhancedResetEnabled,
+            hasEnhancedFeatures: this.hasEnhancedFeatures,
+            timestamp: new Date().toISOString()
+        };
+        
+        return diagnostics;
+    }
 }
 
-// 导出
+// 导出类
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = T5Downloader;
 } else if (typeof window !== 'undefined') {
