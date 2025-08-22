@@ -2346,7 +2346,8 @@ class SerialTerminal {
 
     // 保存固件下载日志
     saveFlashLog() {
-        const lines = this.flashLogDisplay.querySelectorAll('.data-line');
+        // 支持新的模块化CSS类和旧的CSS类
+        const lines = this.flashLogDisplay.querySelectorAll('.debug-entry, .data-line, .log-entry');
         if (lines.length === 0) {
             this.showError(i18n.t('no_log_to_save'));
             return;
