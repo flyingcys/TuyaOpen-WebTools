@@ -180,7 +180,7 @@ class T5Downloader extends BaseDownloader {
     }
 
     /**
-     * 接收响应 - 完全按照Python的wait_for_cmd_response机制实现
+     * 接收响应 - 增强版本，支持平台自适应超时
      * Python逻辑：
      * def wait_for_cmd_response(self, expect_length, timeout_sec=0.1):
      *     timeout = serial.Timeout(timeout_sec)
@@ -193,6 +193,13 @@ class T5Downloader extends BaseDownloader {
      *     return read_buf
      */
     async receiveResponse(expectedLength, timeout = 100) {  // Python默认0.1秒即100ms
+        // 平台自适应超时调整
+        const platform = this.detectPlatform();
+        if (platform === 'macOS') {
+            // macOS需要更长的超时时间来稳定通信
+            timeout = Math.max(timeout, 200);  // 至少200ms
+            this.debug('debug', `macOS平台自适应: 超时时间调整为${timeout}ms`);
+        }
         let reader = null;
         try {
             reader = this.port.readable.getReader();
@@ -263,33 +270,82 @@ class T5Downloader extends BaseDownloader {
     }
 
     /**
-     * 步骤1：获取总线控制权 - 完全按照Python的get_bus逻辑
+     * 检测当前平台类型
+     */
+    detectPlatform() {
+        if (typeof navigator !== 'undefined') {
+            const userAgent = navigator.userAgent.toLowerCase();
+            if (userAgent.includes('mac')) {
+                return 'macOS';
+            } else if (userAgent.includes('win')) {
+                return 'Windows';
+            } else if (userAgent.includes('linux')) {
+                return 'Linux';
+            }
+        }
+        return 'Unknown';
+    }
+
+    /**
+     * 步骤1：获取总线控制权 - 增强版本，支持平台自适应
      * Python: max_try_count = 100, do_link_check_ex(max_try_count=60)
      */
     async getBusControl() {
         this.mainLog('=== 步骤1: 获取总线控制权 ===');
         
+        const platform = this.detectPlatform();
+        this.debug('info', `检测到平台: ${platform}`);
+        
+        // 平台自适应配置
+        const platformConfig = this.getPlatformConfig(platform);
+        this.debug('info', `使用平台配置: RST延迟=${platformConfig.resetDelay}ms, 链路检查延迟=${platformConfig.linkCheckDelay}ms`);
+        
         const maxTryCount = 100; // 与Python保持一致
         for (let attempt = 1; attempt <= maxTryCount && !this.stopFlag; attempt++) {
             if (attempt % 10 === 1) {  // 每10次尝试输出一次日志
-                this.commLog(`尝试 ${attempt}/${maxTryCount}`);
+                this.commLog(`尝试 ${attempt}/${maxTryCount} (${platform}平台)`);
             }
             
-            // 复位设备 - 与Python do_reset一致
+            // 复位设备 - 平台自适应版本
             await this.port.setSignals({ dataTerminalReady: false, requestToSend: true });
-            await new Promise(resolve => setTimeout(resolve, 300)); // Python: time.sleep(0.3)
+            await new Promise(resolve => setTimeout(resolve, platformConfig.resetDelay)); // 平台自适应延迟
             await this.port.setSignals({ requestToSend: false });
-            await new Promise(resolve => setTimeout(resolve, 4)); // Python: time.sleep(0.004)
+            await new Promise(resolve => setTimeout(resolve, platformConfig.linkCheckDelay)); // 平台自适应延迟
             
             // do_link_check_ex - 与Python一致，最多60次
             const linkCheckSuccess = await this.doLinkCheckEx(60);
             if (linkCheckSuccess) {
-                this.mainLog(`✅ 第${attempt}次尝试成功获取总线控制权`);
+                this.mainLog(`✅ 第${attempt}次尝试成功获取总线控制权 (${platform}平台)`);
                 return true;
             }
         }
         
         return false;
+    }
+
+    /**
+     * 获取平台配置
+     */
+    getPlatformConfig(platform) {
+        const configs = {
+            'macOS': {
+                resetDelay: 500,     // macOS需要更长的复位延迟
+                linkCheckDelay: 10,  // macOS需要更长的链路检查延迟
+                preferredBaudrate: 1000000  // macOS使用较低的波特率
+            },
+            'Windows': {
+                resetDelay: 300,     // Windows使用默认延迟
+                linkCheckDelay: 4,   // Windows使用默认延迟
+                preferredBaudrate: 2000000  // Windows可以使用高波特率
+            },
+            'Linux': {
+                resetDelay: 300,     // Linux使用默认延迟
+                linkCheckDelay: 4,   // Linux使用默认延迟
+                preferredBaudrate: 2000000  // Linux可以使用高波特率
+            }
+        };
+        
+        return configs[platform] || configs['Windows']; // 默认使用Windows配置
     }
 
     /**
@@ -1490,19 +1546,53 @@ class T5Downloader extends BaseDownloader {
         //     return True
         
         const length = sectorData.length;
+        const platform = this.detectPlatform();
         
-        // Python: if not self.write_sector(addr, buf_sec, flash_size): return False
-        if (!await this.writeSector(addr, sectorData, flashSize)) {
-            return false;
+        // 平台自适应重试策略
+        const maxRetries = platform === 'macOS' ? 3 : 1;  // macOS需要更多重试
+        
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            if (this.stopFlag) break;
+            
+            if (attempt > 1) {
+                this.debug('info', `${platform}平台写入重试 ${attempt}/${maxRetries} - 地址: 0x${addr.toString(16).padStart(8, '0')}`);
+                
+                // macOS平台添加稳定性延迟
+                if (platform === 'macOS') {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+            }
+            
+            // Python: if not self.write_sector(addr, buf_sec, flash_size): return False
+            if (!await this.writeSector(addr, sectorData, flashSize)) {
+                if (attempt === maxRetries) {
+                    this.debug('error', `${platform}平台写入扇区失败，已达最大重试次数`);
+                    return false;
+                } else {
+                    this.debug('warning', `${platform}平台写入扇区失败，继续重试...`);
+                    continue;
+                }
+            }
+            
+            // Python: if not self.check_crc_ver2(buf_sec, addr, length, flash_size): return False
+            if (!await this.checkCrcVer2(sectorData, addr, length, flashSize)) {
+                if (attempt === maxRetries) {
+                    this.debug('error', `${platform}平台CRC校验失败，已达最大重试次数`);
+                    return false;
+                } else {
+                    this.debug('warning', `${platform}平台CRC校验失败，继续重试...`);
+                    continue;
+                }
+            }
+            
+            // 成功
+            if (attempt > 1) {
+                this.debug('info', `✅ ${platform}平台写入成功 (重试${attempt}次)`);
+            }
+            return true;
         }
         
-        // Python: if not self.check_crc_ver2(buf_sec, addr, length, flash_size): return False
-        if (!await this.checkCrcVer2(sectorData, addr, length, flashSize)) {
-            return false;
-        }
-        
-        // Python: return True
-        return true;
+        return false;
     }
     
     // 写入扇区 - 完全按照Python write_sector方法实现
@@ -1597,7 +1687,7 @@ class T5Downloader extends BaseDownloader {
                 throw new Error('写入响应长度字段错误');
             }
             
-            // 3. check_response_status: 检查状态码 (位置10)
+            // 3. check_response_status: 检查状态码 (位置10) - 增强版本，支持平台自适应重试
             const statusCode = response[10];
             if (statusCode !== 0x00) {
                 // 根据Python STATUS_INFO解析错误
@@ -1614,8 +1704,35 @@ class T5Downloader extends BaseDownloader {
                 
                 const errorInfo = statusInfo.find(info => info.code === statusCode);
                 const errorDesc = errorInfo ? errorInfo.desc : `未知错误码 0x${statusCode.toString(16).padStart(2, '0')}`;
+                
+                // 特殊处理：macOS平台的0x05错误（package length error）
+                if (statusCode === 0x05) {
+                    const platform = this.detectPlatform();
+                    if (platform === 'macOS') {
+                        this.debug('warning', `检测到macOS平台的package length error，尝试平台兼容性处理...`);
+                        
+                        // 记录错误但不立即抛出，允许重试机制处理
+                        this.macOSPackageLengthErrorCount = (this.macOSPackageLengthErrorCount || 0) + 1;
+                        
+                        if (this.macOSPackageLengthErrorCount <= 3) {
+                            this.debug('info', `macOS兼容性重试 ${this.macOSPackageLengthErrorCount}/3 - 添加稳定性延迟`);
+                            
+                            // 添加额外的稳定性延迟，帮助macOS稳定通信
+                            await new Promise(resolve => setTimeout(resolve, 50));
+                            
+                            // 返回false让上层重试机制处理，而不是直接抛出异常
+                            return false;
+                        } else {
+                            this.debug('error', `macOS兼容性重试已达到最大次数，错误无法恢复`);
+                        }
+                    }
+                }
+                
                 throw new Error(`Flash写入失败: ${errorDesc} (状态码: 0x${statusCode.toString(16).padStart(2, '0')})`);
             }
+            
+            // 重置错误计数器（成功时）
+            this.macOSPackageLengthErrorCount = 0;
             
             // 4. 协议特定检查
             if (isExt) {
