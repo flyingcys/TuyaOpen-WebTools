@@ -160,8 +160,11 @@ class T5Downloader extends BaseDownloader {
             throw new Error(`操作已被用户取消`);
         }
         
-        this.commLog(`发送${commandName}`);
-        this.debugLog(`发送${commandName}: ${command.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
+        // 过滤WriteSector的日志输出，避免过多的二进制数据日志
+        if (commandName !== 'WriteSector') {
+            this.commLog(`发送${commandName}`);
+            this.debugLog(`发送${commandName}: ${command.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
+        }
         
         let writer = null;
         try {
