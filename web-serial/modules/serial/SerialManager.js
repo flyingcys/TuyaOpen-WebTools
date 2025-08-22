@@ -214,7 +214,7 @@ class SerialManager {
                     this.isFlashConnected = true;
                     
                     this.eventBus.emit('flash:connected', {
-                        config: { baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none' },
+                        config: { baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none' },
                         requestedBaudrate: baudrate,
                         port: this.flashPort,
                         reader: this.flashReader,
@@ -251,7 +251,8 @@ class SerialManager {
                 baudRate: 115200,
                 dataBits: 8,
                 stopBits: 1,
-                parity: 'none'
+                parity: 'none',
+                flowControl: 'none'  // 明确设置流控制为none，确保Linux/Windows一致性
             };
 
             // 打开串口
@@ -334,7 +335,8 @@ class SerialManager {
                 baudRate: 115200,
                 dataBits: 8,
                 stopBits: 1,
-                parity: 'none'
+                parity: 'none',
+                flowControl: 'none'  // 明确设置流控制为none，确保Linux/Windows一致性
             };
 
             // 打开串口
@@ -538,7 +540,8 @@ class SerialManager {
             baudRate: 115200,
             dataBits: 8,
             stopBits: 1,
-            parity: 'none'
+            parity: 'none',
+            flowControl: 'none'  // 明确设置流控制为none，确保Linux/Windows一致性
         };
     }
     

@@ -133,7 +133,8 @@ class DownloaderManager {
             // 动态加载脚本
             console.log(`📥 动态加载下载器脚本: ${chipConfig.scriptPath}`);
             const script = document.createElement('script');
-            script.src = chipConfig.scriptPath;
+            // 🔧 关键修复：添加时间戳参数强制刷新缓存，确保Ubuntu调试代码生效
+            script.src = chipConfig.scriptPath + '?v=' + Date.now();
             
             return new Promise((resolve, reject) => {
                 script.onload = () => {

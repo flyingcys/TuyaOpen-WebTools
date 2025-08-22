@@ -1,12 +1,41 @@
 /**
  * T5AI芯片下载器 - 基于成功测试的逻辑实现
  * 完全按照t5-flash-test.html中调试成功的协议逻辑
+ * 
+ * 版本: v1.2.0-ubuntu-debug
+ * 修改日期: 2025-08-21
+ * 修改内容: 增强Ubuntu兼容性和调试日志
  */
+
+// 版本标识和系统检测
+console.log('🔧 T5AI下载器版本: v1.2.0-ubuntu-debug (2025-08-21)');
+console.log('🔧 检测到的用户代理:', navigator.userAgent);
+console.log('🔧 检测到的平台:', navigator.platform);
+console.log('🔧 Web Serial API 支持:', 'serial' in navigator ? '✅ 支持' : '❌ 不支持');
 
 class T5Downloader extends BaseDownloader {
     constructor(serialPort, debugCallback) {
         super(serialPort, debugCallback);
         this.chipName = 'T5AI';
+        
+        // 系统环境检测日志
+        this.debugLog('🔧 T5AI下载器初始化开始...');
+        this.debugLog('🖥️ 检测到的操作系统:', this.detectOS());
+        this.debugLog('🌐 浏览器类型:', this.detectBrowser());
+        this.debugLog('📱 设备类型:', this.detectDevice());
+        
+        // 串口状态检测
+        if (serialPort) {
+            this.debugLog('🔌 串口对象状态检测:');
+            this.debugLog(`  - 串口对象存在: ${!!serialPort}`);
+            this.debugLog(`  - readable可用: ${!!(serialPort.readable)}`);
+            this.debugLog(`  - writable可用: ${!!(serialPort.writable)}`);
+            
+            // 获取串口信息（如果可用）
+            this.getPortInfo(serialPort);
+        } else {
+            this.debugLog('❌ 串口对象为null或未定义');
+        }
         
         // Flash芯片数据库 - 完全按照测试版本的数据
         this.flashDatabase = {
@@ -124,20 +153,162 @@ class T5Downloader extends BaseDownloader {
     }
 
     /**
+     * 检测操作系统
+     */
+    detectOS() {
+        const platform = navigator.platform.toLowerCase();
+        const userAgent = navigator.userAgent.toLowerCase();
+        
+        if (platform.includes('linux') || userAgent.includes('linux')) {
+            return 'Linux';
+        } else if (platform.includes('win') || userAgent.includes('windows')) {
+            return 'Windows';
+        } else if (platform.includes('mac') || userAgent.includes('mac')) {
+            return 'macOS';
+        } else {
+            return `未知 (platform: ${platform})`;
+        }
+    }
+
+    /**
+     * 检测浏览器类型
+     */
+    detectBrowser() {
+        const userAgent = navigator.userAgent;
+        
+        if (userAgent.includes('Chrome') && !userAgent.includes('Edge')) {
+            return 'Chrome';
+        } else if (userAgent.includes('Firefox')) {
+            return 'Firefox';
+        } else if (userAgent.includes('Safari') && !userAgent.includes('Chrome')) {
+            return 'Safari';
+        } else if (userAgent.includes('Edge')) {
+            return 'Edge';
+        } else {
+            return '未知浏览器';
+        }
+    }
+
+    /**
+     * 检测设备类型
+     */
+    detectDevice() {
+        const userAgent = navigator.userAgent.toLowerCase();
+        
+        if (userAgent.includes('mobile') || userAgent.includes('android') || userAgent.includes('iphone')) {
+            return '移动设备';
+        } else {
+            return '桌面设备';
+        }
+    }
+
+    /**
+     * 检查是否为串口断开错误
+     */
+    isPortDisconnectionError(error) {
+        if (!error) return false;
+        
+        const errorMessage = error.message || error.toString();
+        const disconnectionErrors = [
+            'The device has been lost',
+            'Device disconnected',
+            'Failed to execute \'read\'',
+            'Failed to execute \'write\'',
+            'The port is already closed',
+            'NetworkError',
+            'DOMException',
+            'Pipe closed',
+            'Stream closed'
+        ];
+        
+        return disconnectionErrors.some(msg => errorMessage.includes(msg));
+    }
+
+    /**
+     * 获取串口信息
+     */
+    getPortInfo(port) {
+        try {
+            this.debugLog('🔍 获取串口详细信息:');
+            
+            // Web Serial API 的 port 对象信息
+            if (port.getInfo) {
+                const info = port.getInfo();
+                this.debugLog(`  - VID: ${info.usbVendorId ? '0x' + info.usbVendorId.toString(16) : '未知'}`);
+                this.debugLog(`  - PID: ${info.usbProductId ? '0x' + info.usbProductId.toString(16) : '未知'}`);
+            }
+            
+            // 检查串口状态
+            this.debugLog(`  - 串口已打开: ${port.readable && port.writable}`);
+            this.debugLog(`  - readable锁定状态: ${port.readable && port.readable.locked ? '已锁定' : '未锁定'}`);
+            this.debugLog(`  - writable锁定状态: ${port.writable && port.writable.locked ? '已锁定' : '未锁定'}`);
+            
+        } catch (error) {
+            this.debugLog(`⚠️ 获取串口信息失败: ${error.message}`);
+        }
+    }
+
+    /**
      * 清空接收缓冲区 - 完全按照测试版本的逻辑
      */
     async clearBuffer() {
+        this.debugLog('开始清空接收缓冲区...');
         let reader = null;
+        let totalBytesCleared = 0;
+        let readAttempts = 0;
+        
         try {
+            // 检查串口状态
+            if (!this.port || !this.port.readable) {
+                this.debugLog('❌ 串口不可用，无法清空缓冲区');
+                return;
+            }
+            
+            this.debugLog('📖 获取串口readable reader...');
             reader = this.port.readable.getReader();
+            this.debugLog('✅ reader获取成功');
+            
             while (true) {
+                readAttempts++;
+                this.debugLog(`📥 清理缓冲区第${readAttempts}次尝试...`);
+                
                 const { value, done } = await Promise.race([
                     reader.read(),
-                    new Promise(resolve => setTimeout(() => resolve({ done: true }), 5))
+                    new Promise(resolve => setTimeout(() => resolve({ done: true, timedOut: true }), 50))
                 ]);
-                if (done || !value || value.length === 0) break;
+                
+                if (done || !value || value.length === 0) {
+                    if (value && value.length > 0) {
+                        totalBytesCleared += value.length;
+                        const hexData = Array.from(value).map(b => b.toString(16).padStart(2, '0')).join(' ');
+                        this.debugLog(`🗑️ 清理数据: ${value.length}字节 - ${hexData}`);
+                    } else {
+                        this.debugLog(`⏰ 第${readAttempts}次尝试：${done ? '流结束' : '超时'}`);
+                    }
+                    break;
+                } else {
+                    totalBytesCleared += value.length;
+                    const hexData = Array.from(value).map(b => b.toString(16).padStart(2, '0')).join(' ');
+                    this.debugLog(`🗑️ 清理数据: ${value.length}字节 - ${hexData}`);
+                    
+                    // 尝试解析为文本，检测设备状态
+                    try {
+                        const text = new TextDecoder().decode(value);
+                        if (text.includes('tuya>') || text.includes('\r\ntuya>')) {
+                            this.debugLog('⚠️ 检测到应用程序提示符 "tuya>" - 设备未在bootloader模式！');
+                        }
+                        if (text.length > 0 && text.trim().length > 0) {
+                            this.debugLog(`📝 文本内容: "${text.replace(/\r/g, '\\r').replace(/\n/g, '\\n')}"`);
+                        }
+                    } catch (e) {
+                        // 忽略解码错误
+                    }
+                }
             }
+            
+            this.debugLog(`✅ 缓冲区清理完成，共清理${totalBytesCleared}字节，尝试${readAttempts}次`);
         } catch (error) {
+            this.debugLog(`❌ 清理缓冲区时发生错误: ${error.message}`);
             // 检查是否为串口异常断开
             if (this.isPortDisconnectionError(error)) {
                 throw new Error('设备连接已断开，请检查USB连接后重试');
@@ -145,8 +316,243 @@ class T5Downloader extends BaseDownloader {
             // 其他错误忽略
         } finally {
             if (reader) {
-                try { reader.releaseLock(); } catch (e) {}
+                try { 
+                    this.debugLog('🔓 释放reader锁定...');
+                    reader.releaseLock(); 
+                    this.debugLog('✅ reader锁定已释放');
+                } catch (e) {
+                    this.debugLog(`⚠️ 释放reader锁定失败: ${e.message}`);
+                }
             }
+        }
+    }
+
+    /**
+     * 清空缓冲区并返回内容（用于检测命令行模式）
+     */
+    async clearBufferWithReturn() {
+        let allData = '';
+        let reader = null;
+        let totalBytesCleared = 0;
+        
+        try {
+            if (!this.port || !this.port.readable) {
+                return '';
+            }
+            
+            reader = this.port.readable.getReader();
+            
+            for (let i = 0; i < 5; i++) {
+                const { value, done } = await Promise.race([
+                    reader.read(),
+                    new Promise(resolve => setTimeout(() => resolve({ done: true }), 50))
+                ]);
+                
+                if (done || !value || value.length === 0) break;
+                
+                totalBytesCleared += value.length;
+                
+                // 尝试转换为文本
+                try {
+                    const text = new TextDecoder().decode(value);
+                    allData += text;
+                } catch (e) {
+                    // 忽略解码错误
+                }
+                
+                this.debugLog(`🗑️ 清理数据: ${value.length}字节 - ${Array.from(value).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+            }
+            
+            if (totalBytesCleared > 0) {
+                this.debugLog(`✅ 缓冲区清理完成，共清理${totalBytesCleared}字节`);
+                if (allData.includes('tuya>')) {
+                    this.debugLog('⚠️ 检测到命令行提示符 "tuya>"');
+                }
+            }
+        } catch (error) {
+            // 忽略错误
+        } finally {
+            if (reader) {
+                try { 
+                    reader.releaseLock(); 
+                } catch (e) {
+                    // 忽略
+                }
+            }
+        }
+        
+        return allData;
+    }
+
+    /**
+     * 进入下载模式 - 增强的诊断日志版本
+     */
+    async enterDownloadMode() {
+        const startTime = Date.now();
+        const platform = navigator.platform.toLowerCase();
+        const isLinux = platform.includes('linux');
+        const isWindows = platform.includes('win');
+        
+        this.debugLog('🚀 ========== 开始进入下载模式序列 ==========');
+        this.debugLog(`💻 运行平台: ${navigator.platform}`);
+        this.debugLog(`🖥️ 操作系统: Linux=${isLinux}, Windows=${isWindows}`);
+        this.debugLog(`⏰ 开始时间戳: ${startTime}`);
+        
+        try {
+            // 步骤1：检查当前缓冲区状态
+            this.debugLog('📋 步骤1: 检查当前缓冲区状态...');
+            const bufferContent = await this.clearBufferWithReturn();
+            if (bufferContent.includes('tuya>')) {
+                this.debugLog('⚠️ 检测到设备在应用程序模式 (tuya>)，需要强制复位');
+            } else {
+                this.debugLog('✅ 缓冲区干净，设备可能已在bootloader模式');
+            }
+            this.debugLog(`⏱️ 缓冲区检查耗时: ${Date.now() - startTime}ms`);
+            
+            // 步骤2：发送多个Ctrl+C退出任何运行状态
+            const ctrlCTime = Date.now();
+            this.debugLog('📋 步骤2: 发送Ctrl+C中断信号...');
+            const writer = this.port.writable.getWriter();
+            await writer.write(new Uint8Array([0x03, 0x03, 0x03])); // Ctrl+C x3
+            writer.releaseLock();
+            this.debugLog(`✅ Ctrl+C发送完成，耗时: ${Date.now() - ctrlCTime}ms`);
+            
+            // 等待Ctrl+C生效
+            const ctrlCWaitTime = isLinux ? 50 : 100; // Linux减少等待时间
+            this.debugLog(`⏳ 等待Ctrl+C生效: ${ctrlCWaitTime}ms`);
+            await new Promise(resolve => setTimeout(resolve, ctrlCWaitTime));
+            
+            // 清理可能的响应
+            const clearTime = Date.now();
+            this.debugLog('📋 步骤3: 清理Ctrl+C响应...');
+            await this.clearBuffer();
+            this.debugLog(`✅ 清理完成，耗时: ${Date.now() - clearTime}ms`);
+            
+            // 步骤4：T5AI特殊复位序列
+            const resetTime = Date.now();
+            this.debugLog('📋 步骤4: 执行T5AI DTR/RTS复位序列...');
+            this.debugLog(`⏱️ 从开始到复位: ${resetTime - startTime}ms`);
+            
+            // 初始状态：DTR和RTS都设为高
+            const initSignalTime = Date.now();
+            this.debugLog('📌 4.1 初始化信号: DTR=HIGH, RTS=HIGH');
+            await this.port.setSignals({ 
+                dataTerminalReady: true,
+                requestToSend: true
+            });
+            this.debugLog(`✅ 初始化完成，耗时: ${Date.now() - initSignalTime}ms`);
+            
+            // 初始化等待
+            const initWaitTime = isLinux ? 20 : 50; // Linux减少等待
+            this.debugLog(`⏳ 初始化等待: ${initWaitTime}ms`);
+            await new Promise(resolve => setTimeout(resolve, initWaitTime));
+            
+            // 触发复位
+            const triggerResetTime = Date.now();
+            this.debugLog('📌 4.2 触发复位: DTR=LOW, RTS=LOW');
+            await this.port.setSignals({ 
+                dataTerminalReady: false,  // DTR低电平触发复位
+                requestToSend: false       // RTS低电平
+            });
+            this.debugLog(`✅ 复位触发完成，耗时: ${Date.now() - triggerResetTime}ms`);
+            
+            // 复位保持时间 - 这是关键！
+            const resetHoldTime = isLinux ? 50 : 100; // Linux可能需要更短的复位时间
+            this.debugLog(`⏳ 复位保持时间: ${resetHoldTime}ms`);
+            await new Promise(resolve => setTimeout(resolve, resetHoldTime));
+            
+            // 释放复位，进入下载模式
+            const releaseResetTime = Date.now();
+            this.debugLog('📌 4.3 释放复位进入下载模式: DTR=HIGH, RTS=LOW');
+            await this.port.setSignals({ 
+                dataTerminalReady: true,   // DTR高电平释放复位
+                requestToSend: false        // RTS保持低（下载模式）
+            });
+            this.debugLog(`✅ 复位释放完成，耗时: ${Date.now() - releaseResetTime}ms`);
+            
+            // 关键：等待设备进入bootloader的时间窗口
+            // 这是最重要的时间参数！！！
+            const bootloaderWaitTime = isLinux ? 20 : 200; // Linux必须快速发送LinkCheck
+            this.debugLog(`⏳ 等待设备进入bootloader: ${bootloaderWaitTime}ms`);
+            this.debugLog('⚠️ 注意：这个等待时间至关重要！太长设备会进入应用程序');
+            await new Promise(resolve => setTimeout(resolve, bootloaderWaitTime));
+            
+            // 立即检查缓冲区状态
+            const checkTime = Date.now();
+            this.debugLog('📋 步骤5: 立即检查设备状态...');
+            const postResetBuffer = await this.clearBufferWithReturn();
+            if (postResetBuffer.includes('tuya>')) {
+                this.debugLog('❌ 错误：设备进入了应用程序模式！');
+                this.debugLog('❌ 可能原因：等待时间太长或复位序列不正确');
+            } else if (postResetBuffer.length > 0) {
+                this.debugLog(`📝 复位后缓冲区内容: "${postResetBuffer.replace(/\r/g, '\\r').replace(/\n/g, '\\n')}"`);
+            } else {
+                this.debugLog('✅ 缓冲区为空，设备可能在bootloader模式');
+            }
+            this.debugLog(`✅ 状态检查完成，耗时: ${Date.now() - checkTime}ms`);
+            
+            const totalTime = Date.now() - startTime;
+            this.debugLog('✅ ========== 下载模式复位序列完成 ==========');
+            this.debugLog(`⏱️ 总耗时: ${totalTime}ms`);
+            
+            // 如果是Linux且检测到应用模式，尝试备用方案
+            if (isLinux && postResetBuffer.includes('tuya>')) {
+                this.debugLog('🔄 Linux平台检测到失败，尝试备用复位方案...');
+                await this.tryAlternativeReset();
+            }
+            
+        } catch (error) {
+            this.debugLog(`❌ 进入下载模式时出错: ${error.message}`);
+            this.debugLog(`❌ 错误堆栈: ${error.stack}`);
+        }
+    }
+    
+    /**
+     * 备用复位方案 - 用于Linux平台
+     */
+    async tryAlternativeReset() {
+        const startTime = Date.now();
+        this.debugLog('🔄 ========== 开始备用复位方案 ==========');
+        
+        try {
+            // 方案B：使用RTS控制复位
+            this.debugLog('📌 备用方案: 使用RTS控制复位');
+            
+            // 发送Ctrl+C
+            const writer = this.port.writable.getWriter();
+            await writer.write(new Uint8Array([0x03, 0x03, 0x03]));
+            writer.releaseLock();
+            await new Promise(resolve => setTimeout(resolve, 20));
+            
+            // 清理缓冲区
+            await this.clearBuffer();
+            
+            // RTS复位序列
+            this.debugLog('📌 设置: DTR=LOW, RTS=HIGH (RTS复位)');
+            await this.port.setSignals({ 
+                dataTerminalReady: false,
+                requestToSend: true    // RTS高电平触发复位
+            });
+            await new Promise(resolve => setTimeout(resolve, 50));
+            
+            this.debugLog('📌 释放: DTR=LOW, RTS=LOW (进入bootloader)');
+            await this.port.setSignals({ 
+                dataTerminalReady: false,
+                requestToSend: false   // RTS低电平释放复位
+            });
+            
+            // 极短等待 - Linux关键！
+            await new Promise(resolve => setTimeout(resolve, 10));
+            
+            // 立即发送LinkCheck探测
+            this.debugLog('📤 立即发送LinkCheck探测...');
+            await this.sendCommand([0x01, 0xE0, 0xFC, 0x01, 0x00], 'QuickLinkCheck');
+            
+            const totalTime = Date.now() - startTime;
+            this.debugLog(`✅ 备用方案完成，耗时: ${totalTime}ms`);
+            
+        } catch (error) {
+            this.debugLog(`❌ 备用复位方案失败: ${error.message}`);
         }
     }
 
@@ -161,17 +567,44 @@ class T5Downloader extends BaseDownloader {
         }
         
         this.commLog(`发送${commandName}`);
-        this.debugLog(`发送${commandName}: ${command.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
+        this.debugLog(`📤 准备发送${commandName}: ${command.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')} (${command.length}字节)`);
         
         let writer = null;
         try {
+            // 检查串口状态
+            if (!this.port || !this.port.writable) {
+                this.debugLog('❌ 串口不可用，无法发送命令');
+                throw new Error('串口不可用');
+            }
+            
+            this.debugLog('✍️ 获取串口writable writer...');
             writer = this.port.writable.getWriter();
-            await writer.write(new Uint8Array(command));
+            this.debugLog('✅ writer获取成功');
+            
+            // 检查writer状态
+            if (!writer) {
+                this.debugLog('❌ writer为null');
+                throw new Error('无法获取串口writer');
+            }
+            
+            this.debugLog('📡 开始发送数据...');
+            const commandData = new Uint8Array(command);
+            await writer.write(commandData);
+            this.debugLog('✅ 数据发送完成');
+            
         } catch (error) {
+            this.debugLog(`❌ 发送${commandName}时发生错误: ${error.message}`);
+            this.debugLog(`❌ 错误详情:`, error);
             throw new Error(`发送${commandName}失败: ${error.message}`);
         } finally {
             if (writer) {
-                try { writer.releaseLock(); } catch (e) {}
+                try { 
+                    this.debugLog('🔓 释放writer锁定...');
+                    writer.releaseLock(); 
+                    this.debugLog('✅ writer锁定已释放');
+                } catch (e) {
+                    this.debugLog(`⚠️ 释放writer锁定失败: ${e.message}`);
+                }
             }
         }
     }
@@ -190,16 +623,47 @@ class T5Downloader extends BaseDownloader {
      *     return read_buf
      */
     async receiveResponse(expectedLength, timeout = 100) {  // Python默认0.1秒即100ms
+        const isDebugReceive = this.debugMode && expectedLength === 8; // 只对LinkCheck(8字节)做详细日志
+        if (isDebugReceive) {
+            this.debugLog(`📥 ========== 开始接收响应 ==========`);
+            this.debugLog(`  - 期望长度: ${expectedLength}字节`);
+            this.debugLog(`  - 超时设置: ${timeout}ms`);
+            this.debugLog(`  - 平台: ${navigator.platform}`);
+        } else {
+            this.debugLog(`📥 开始接收响应，期望长度: ${expectedLength}字节，超时: ${timeout}ms`);
+        }
         let reader = null;
+        let readAttempts = 0;
+        
         try {
+            // 检查串口状态
+            if (!this.port || !this.port.readable) {
+                this.debugLog('❌ 串口不可用，无法接收响应');
+                throw new Error('串口不可用');
+            }
+            
+            this.debugLog('📖 获取串口readable reader...');
             reader = this.port.readable.getReader();
+            this.debugLog('✅ reader获取成功');
+            
             const responseBuffer = [];
             const startTime = Date.now();
             
             // Python式的阻塞读取循环
             while (responseBuffer.length < expectedLength && Date.now() - startTime < timeout && !this.stopFlag) {
+                readAttempts++;
+                const elapsedTime = Date.now() - startTime;
                 const remainingBytes = expectedLength - responseBuffer.length;
-                const remainingTime = timeout - (Date.now() - startTime);
+                const remainingTime = timeout - elapsedTime;
+                
+                if (isDebugReceive && readAttempts === 1) {
+                    this.debugLog(`📥 第${readAttempts}次读取尝试`);
+                    this.debugLog(`  - 已过时间: ${elapsedTime}ms`);
+                    this.debugLog(`  - 已收到: ${responseBuffer.length}字节`);
+                    this.debugLog(`  - 剩余时间: ${remainingTime}ms`);
+                } else if (!isDebugReceive) {
+                    this.debugLog(`📥 第${readAttempts}次读取尝试，已用时: ${elapsedTime}ms，已收到: ${responseBuffer.length}字节`);
+                }
                 
                 if (remainingTime <= 0) break;
                 
@@ -221,7 +685,17 @@ class T5Downloader extends BaseDownloader {
                     if (result.timedOut || result.done) {
                         // 超时或流结束，但Python会继续尝试直到总超时
                         if (result.timedOut) {
+                            if (isDebugReceive) {
+                                this.debugLog(`⏰ 读取超时`);
+                                this.debugLog(`  - 剩余时间: ${remainingTime}ms`);
+                                this.debugLog(`  - 读取次数: ${readAttempts}`);
+                            } else {
+                                this.debugLog(`⏰ 读取超时，剩余时间: ${remainingTime}ms，退出循环`);
+                            }
                             break; // 总超时，退出
+                        }
+                        if (!isDebugReceive) {
+                            this.debugLog(`📞 串口流结束(done)，等待1ms后继续尝试...`);
                         }
                         // 如果是done但不是超时，短暂等待后继续尝试
                         await new Promise(resolve => setTimeout(resolve, 1));
@@ -230,13 +704,16 @@ class T5Downloader extends BaseDownloader {
                     
                     if (result.value && result.value.length > 0) {
                         responseBuffer.push(...result.value);
-                        this.debugLog(`接收: ${Array.from(result.value).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')} (累计${responseBuffer.length}字节)`);
+                        this.debugLog(`📦 接收: ${Array.from(result.value).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')} (新增${result.value.length}字节，累计${responseBuffer.length}字节)`);
                         
                         // Python逻辑：收到期望长度立即返回
                         if (responseBuffer.length >= expectedLength) {
-                            this.commLog(`接收响应完成: ${responseBuffer.length}字节`);
+                            this.commLog(`✅ 接收响应完成: ${responseBuffer.length}字节`);
+                            this.debugLog(`✅ 响应数据完整: ${responseBuffer.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
                             break;
                         }
+                    } else {
+                        this.debugLog(`📭 读取结果为空，继续尝试...`);
                     }
                 } catch (error) {
                     // 检查是否为串口异常断开
@@ -249,40 +726,123 @@ class T5Downloader extends BaseDownloader {
                 }
             }
             
+            const finalLength = responseBuffer.length;
+            const totalTime = Date.now() - startTime;
+            
+            if (isDebugReceive) {
+                if (finalLength < expectedLength) {
+                    this.debugLog(`⚠️ ========== 接收不完整 ==========`);
+                    this.debugLog(`  - 期望: ${expectedLength}字节`);
+                    this.debugLog(`  - 实际: ${finalLength}字节`);
+                    this.debugLog(`  - 耗时: ${totalTime}ms`);
+                    this.debugLog(`  - 尝试: ${readAttempts}次`);
+                    this.debugLog(`  - 可能原因: 设备未响应或串口通信问题`);
+                } else {
+                    this.debugLog(`✅ 接收完成: ${finalLength}字节, ${totalTime}ms, ${readAttempts}次`);
+                }
+            } else {
+                if (finalLength < expectedLength) {
+                    this.debugLog(`⚠️ 接收不完整: 期望${expectedLength}字节，实际收到${finalLength}字节，用时${totalTime}ms，尝试${readAttempts}次`);
+                } else {
+                    this.debugLog(`✅ 接收完成: 收到${finalLength}字节，用时${totalTime}ms，尝试${readAttempts}次`);
+                }
+            }
+            
             return responseBuffer;
         } catch (error) {
+            this.debugLog(`❌ 接收响应时发生错误: ${error.message}`);
+            this.debugLog(`❌ 错误详情:`, error);
             throw new Error(`接收响应失败: ${error.message}`);
         } finally {
             if (reader) {
-                try { reader.releaseLock(); } catch (e) {}
+                try { 
+                    this.debugLog('🔓 释放reader锁定...');
+                    reader.releaseLock(); 
+                    this.debugLog('✅ reader锁定已释放');
+                } catch (e) {
+                    this.debugLog(`⚠️ 释放reader锁定失败: ${e.message}`);
+                }
             }
         }
     }
 
     /**
-     * 步骤1：获取总线控制权 - 完全按照Python的get_bus逻辑
-     * Python: max_try_count = 100, do_link_check_ex(max_try_count=60)
+     * 步骤1：获取总线控制权 - 增强Linux兼容性
      */
     async getBusControl() {
         this.mainLog('=== 步骤1: 获取总线控制权 ===');
         
-        const maxTryCount = 100; // 与Python保持一致
+        // 步骤1：先尝试快速模式（适合已在下载模式的设备）
+        this.debugLog('🚀 尝试快速模式连接...');
+        for (let quickTry = 1; quickTry <= 3; quickTry++) {
+            await this.clearBuffer();
+            await this.sendCommand([0x01, 0xE0, 0xFC, 0x01, 0x00], 'LinkCheck');
+            const quickResponse = await this.receiveResponse(8, 50);
+            
+            if (quickResponse.length === 8 && 
+                quickResponse[0] === 0x04 && quickResponse[1] === 0x0E &&
+                quickResponse[6] === 0x01 && quickResponse[7] === 0x00) {
+                this.mainLog(`✅ 快速模式：第${quickTry}次尝试成功`);
+                return true;
+            }
+        }
+        
+        // 步骤2：快速模式失败，执行完整流程
+        this.mainLog('快速模式失败，开始完整连接流程...');
+        
+        const maxTryCount = 100;
         for (let attempt = 1; attempt <= maxTryCount && !this.stopFlag; attempt++) {
-            if (attempt % 10 === 1) {  // 每10次尝试输出一次日志
+            if (attempt % 10 === 1) {
                 this.commLog(`尝试 ${attempt}/${maxTryCount}`);
             }
             
-            // 复位设备 - 与Python do_reset一致
-            await this.port.setSignals({ dataTerminalReady: false, requestToSend: true });
-            await new Promise(resolve => setTimeout(resolve, 300)); // Python: time.sleep(0.3)
-            await this.port.setSignals({ requestToSend: false });
-            await new Promise(resolve => setTimeout(resolve, 4)); // Python: time.sleep(0.004)
+            // 每10次尝试或第一次尝试时，执行完整复位
+            if (attempt === 1 || attempt % 10 === 1) {
+                const resetStartTime = Date.now();
+                this.debugLog(`📊 ===== 复位尝试 ${attempt}/${maxTryCount} =====`);
+                
+                // 检查是否在命令行模式
+                const bufferCheckTime = Date.now();
+                const bufferData = await this.clearBufferWithReturn();
+                this.debugLog(`⏱️ 缓冲区检查耗时: ${Date.now() - bufferCheckTime}ms`);
+                
+                if (bufferData.includes('tuya>')) {
+                    this.debugLog('⚠️ 检测到命令行模式 "tuya>"，执行强制进入下载模式序列');
+                    this.debugLog(`📝 缓冲区内容: "${bufferData.substring(0, 50)}..."`);
+                } else if (bufferData.length > 0) {
+                    this.debugLog(`📝 缓冲区有其他内容: "${bufferData.substring(0, 50)}..."`);
+                } else {
+                    this.debugLog('✅ 缓冲区为空，可能已在bootloader模式');
+                }
+                
+                // 执行复位序列
+                this.debugLog(`🔄 执行复位流程 (第${attempt}次尝试)`);
+                await this.enterDownloadMode();
+                
+                this.debugLog(`⏱️ 复位总耗时: ${Date.now() - resetStartTime}ms`);
+            }
             
-            // do_link_check_ex - 与Python一致，最多60次
+            // 执行LinkCheck
             const linkCheckSuccess = await this.doLinkCheckEx(60);
             if (linkCheckSuccess) {
                 this.mainLog(`✅ 第${attempt}次尝试成功获取总线控制权`);
                 return true;
+            }
+            
+            // 如果连续失败，尝试不同的复位方法
+            if (attempt % 20 === 0) {
+                this.debugLog('🔄 尝试备用复位序列...');
+                // 备用序列：RTS控制复位
+                await this.port.setSignals({ 
+                    dataTerminalReady: false,
+                    requestToSend: true    // RTS高电平
+                });
+                await new Promise(resolve => setTimeout(resolve, 300));
+                await this.port.setSignals({ 
+                    dataTerminalReady: false,
+                    requestToSend: false   // RTS低电平释放复位
+                });
+                await new Promise(resolve => setTimeout(resolve, 100));
             }
         }
         
@@ -294,21 +854,110 @@ class T5Downloader extends BaseDownloader {
      * Python: max_try_count=60, timeout_sec=0.001
      */
     async doLinkCheckEx(maxTryCount = 60) {
+        this.debugLog(`🔗 ========== 开始LinkCheck ========== `);
+        this.debugLog(`📋 最多尝试: ${maxTryCount}次`);
+        this.debugLog(`💻 平台: ${navigator.platform}`);
+        
+        let totalResponseBytes = 0;
+        let validResponses = 0;
+        let timeouts = 0;
+        let noResponseCount = 0;
+        const startTime = Date.now();
+        
         for (let cnt = 0; cnt < maxTryCount && !this.stopFlag; cnt++) {
+            const attemptStart = Date.now();
+            
+            // 每10次显示详细日志
+            if (cnt === 0 || cnt % 10 === 0) {
+                this.debugLog(`🔗 LinkCheck第${cnt + 1}/${maxTryCount}次尝试`);
+                this.debugLog(`⏱️ 已经过: ${Date.now() - startTime}ms`);
+            }
+            
+            try {
+                // 清理缓冲区
+                const clearStart = Date.now();
                 await this.clearBuffer();
-                await this.sendCommand([0x01, 0xE0, 0xFC, 0x01, 0x00], 'LinkCheck');
+                const clearTime = Date.now() - clearStart;
+                if (cnt === 0) {
+                    this.debugLog(`⏱️ 清理缓冲区耗时: ${clearTime}ms`);
+                }
                 
-            // Python使用0.001秒超时，即1毫秒
-            const response = await this.receiveResponse(8, 1);
-                if (response.length >= 8) {
-                    const r = response.slice(0, 8);
-                    if (r[0] === 0x04 && r[1] === 0x0E && r[2] === 0x05 && 
-                        r[3] === 0x01 && r[4] === 0xE0 && r[5] === 0xFC && 
-                        r[6] === 0x01 && r[7] === 0x00) {
-                        return true;
+                // 发送LinkCheck命令
+                const sendStart = Date.now();
+                await this.sendCommand([0x01, 0xE0, 0xFC, 0x01, 0x00], 'LinkCheck');
+                const sendTime = Date.now() - sendStart;
+                if (cnt === 0) {
+                    this.debugLog(`⏱️ 发送命令耗时: ${sendTime}ms`);
+                }
+                
+                // 增加超时时间以兼容Linux系统（从1ms增加到10ms）
+                const receiveStart = Date.now();
+                const response = await this.receiveResponse(8, 10);
+                const receiveTime = Date.now() - receiveStart;
+                const attemptTime = Date.now() - attemptStart;
+                
+                totalResponseBytes += response.length;
+                
+                // 详细记录每次尝试的结果
+                if (response.length > 0) {
+                    validResponses++;
+                    this.debugLog(`📦 第${cnt + 1}次收到响应: 长度=${response.length}, 用时=${attemptTime}ms`);
+                    this.debugLog(`📦 响应数据: ${response.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
+                    this.debugLog(`⏱️ 接收耗时: ${receiveTime}ms`);
+                } else {
+                    timeouts++;
+                    noResponseCount++;
+                    if (cnt === 0 || cnt === 1 || cnt % 10 === 9) { // 前两次和每10次记录
+                        this.debugLog(`⏰ 第${cnt + 1}次LinkCheck无响应`);
+                        this.debugLog(`  - 总耗时: ${attemptTime}ms`);
+                        this.debugLog(`  - 清理: ${clearTime}ms, 发送: ${sendTime}ms, 等待: ${receiveTime}ms`);
+                        this.debugLog(`  - 累计无响应: ${noResponseCount}次`);
                     }
                 }
+                
+                // 检查响应是否正确
+                if (response.length >= 8) {
+                    const r = response.slice(0, 8);
+                    const expectedPattern = [0x04, 0x0E, 0x05, 0x01, 0xE0, 0xFC, 0x01, 0x00];
+                    
+                    // 逐字节检查
+                    let patternMatch = true;
+                    for (let i = 0; i < 8; i++) {
+                        if (r[i] !== expectedPattern[i]) {
+                            patternMatch = false;
+                            this.debugLog(`❌ 字节${i}不匹配: 期望0x${expectedPattern[i].toString(16).padStart(2, '0').toUpperCase()}, 实际0x${r[i].toString(16).padStart(2, '0').toUpperCase()}`);
+                        }
+                    }
+                    
+                    if (patternMatch) {
+                        const totalTime = Date.now() - startTime;
+                        this.debugLog(`✅ LinkCheck成功！`);
+                        this.debugLog(`✅ 统计信息: 尝试${cnt + 1}次, 总用时${totalTime}ms, 有效响应${validResponses}次, 超时${timeouts}次`);
+                        return true;
+                    } else {
+                        this.debugLog(`❌ 响应模式不匹配`);
+                        this.debugLog(`❌ 期望: ${expectedPattern.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
+                        this.debugLog(`❌ 实际: ${r.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
+                    }
+                } else if (response.length > 0) {
+                    this.debugLog(`❌ 响应长度不足: ${response.length}字节 < 8字节`);
+                }
+                
+            } catch (error) {
+                this.debugLog(`❌ LinkCheck第${cnt + 1}次尝试异常: ${error.message}`);
             }
+        }
+        
+        const totalTime = Date.now() - startTime;
+        this.debugLog(`❌ ========== LinkCheck最终失败 ==========`);
+        this.debugLog(`❌ 最终统计:`);
+        this.debugLog(`  - 尝试次数: ${maxTryCount}次`);
+        this.debugLog(`  - 总耗时: ${totalTime}ms`);
+        this.debugLog(`  - 平均每次: ${Math.round(totalTime/maxTryCount)}ms`);
+        this.debugLog(`  - 有效响应: ${validResponses}次`);
+        this.debugLog(`  - 超时/无响应: ${timeouts}次`);
+        this.debugLog(`  - 总接收字节: ${totalResponseBytes}`);
+        this.debugLog(`⚠️ 可能原因: 设备未进入bootloader模式或DTR/RTS信号问题`);
         return false;
     }
 
@@ -745,7 +1394,7 @@ class T5Downloader extends BaseDownloader {
                         this.warningLog(`Retry write at ${currentAddr.toString(16).padStart(8, '0')}`);
                         
                         // Python: if not self.ser_handle.retry_write_sector(i+start_addr, wbuf[i:i+0x1000], flash_size, self.retry, self.check_stop):
-                        if (!await this.retryWriteSector(currentAddr, sectorData, flashSize, 5)) {
+                        if (!await this.retryWriteSector(currentAddr, sectorData, flash_size, 5)) {
                             // Python: self.logger.error(f"Error write at {(i+start_addr):08x}"); return False
                             throw new Error(`Error write at ${currentAddr.toString(16).padStart(8, '0')}`);
                         }
