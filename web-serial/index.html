@@ -423,6 +423,28 @@
                         </button>
                     </div>
 
+                    <!-- T5AI调试工具区域 -->
+                    <div class="debug-area" id="t5aiDebugArea" style="display: none;">
+                        <div class="debug-header">
+                            <h4 data-i18n="t5ai_debug_tools">🔧 T5AI调试工具</h4>
+                            <small data-i18n="t5ai_debug_description">用于诊断T5AI在Ubuntu/macOS平台的复位问题</small>
+                        </div>
+                        <div class="debug-controls">
+                            <button id="testResetBtn" class="btn btn-debug" disabled>
+                                <span class="icon">🔄</span>
+                                <span data-i18n="test_reset">测试复位</span>
+                            </button>
+                            <button id="testLinkCheckBtn" class="btn btn-debug" disabled>
+                                <span class="icon">🔗</span>
+                                <span data-i18n="test_link_check">测试链路检查</span>
+                            </button>
+                            <button id="getChipInfoBtn" class="btn btn-debug" disabled>
+                                <span class="icon">🎯</span>
+                                <span data-i18n="get_chip_info">获取芯片信息</span>
+                            </button>
+                        </div>
+                    </div>
+
                     <div class="flash-options">
                         <label class="checkbox-container">
                             <input type="checkbox" id="autoDisconnectAfterFlash">

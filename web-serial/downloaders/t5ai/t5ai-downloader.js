@@ -263,6 +263,164 @@ class T5Downloader extends BaseDownloader {
     }
 
     /**
+     * 平台检测 - 获取当前运行平台信息
+     */
+    getPlatformInfo() {
+        const platform = navigator.platform.toLowerCase();
+        const userAgent = navigator.userAgent.toLowerCase();
+        
+        if (platform.includes('linux') || userAgent.includes('linux')) {
+            return 'Linux';
+        } else if (platform.includes('mac') || userAgent.includes('mac')) {
+            return 'macOS';
+        } else if (platform.includes('win') || userAgent.includes('win')) {
+            return 'Windows';
+        } else {
+            return 'Unknown';
+        }
+    }
+
+    /**
+     * 获取平台特定的复位延时配置
+     */
+    getPlatformResetConfig() {
+        const platform = this.getPlatformInfo();
+        
+        // 基于平台优化延时配置
+        switch (platform) {
+            case 'Linux':
+                return {
+                    rstDelay: 300,      // DTR/RTS保持时间
+                    postDelay: 4,       // 复位后等待时间
+                    retryDelay: 50      // 重试间隔
+                };
+            case 'macOS':
+                return {
+                    rstDelay: 400,      // macOS可能需要更长延时
+                    postDelay: 10,      
+                    retryDelay: 100
+                };
+            case 'Windows':
+                return {
+                    rstDelay: 300,      // Windows表现良好的配置
+                    postDelay: 4,       
+                    retryDelay: 20
+                };
+            default:
+                return {
+                    rstDelay: 300,
+                    postDelay: 4,
+                    retryDelay: 50
+                };
+        }
+    }
+
+    /**
+     * 健壮的设备复位方法 - 借鉴ESP32的兼容性检测机制
+     * 实现多层回退机制以确保跨平台兼容性
+     */
+    async robustDeviceReset() {
+        const platform = this.getPlatformInfo();
+        const config = this.getPlatformResetConfig();
+        
+        this.debugLog(`检测到平台: ${platform}`);
+        this.infoLog(`使用平台配置: RST延迟=${config.rstDelay}ms, 链路检查延迟=${config.postDelay}ms`);
+        
+        let resetSuccess = false;
+        let lastError = null;
+        
+        // 方法1：优先尝试独立的DTR/RTS控制方法（ESP32验证有效的方法）
+        if (!resetSuccess) {
+            try {
+                this.debugLog('尝试方法1: 独立DTR/RTS控制');
+                
+                // 检查是否支持独立控制
+                if (this.port.setDTR && this.port.setRTS) {
+                    await this.port.setDTR(false);
+                    await this.port.setRTS(true);
+                    await new Promise(resolve => setTimeout(resolve, config.rstDelay));
+                    await this.port.setRTS(false);
+                    await new Promise(resolve => setTimeout(resolve, config.postDelay));
+                    
+                    resetSuccess = true;
+                    this.debugLog('✅ 方法1成功: 独立DTR/RTS控制');
+                } else {
+                    this.debugLog('⚠️ 方法1不可用: 串口不支持独立DTR/RTS控制');
+                }
+                
+            } catch (error) {
+                lastError = error;
+                this.debugLog(`❌ 方法1失败: ${error.message}`);
+            }
+        }
+        
+        // 方法2：使用setSignals组合方法（当前T5AI使用的方法）
+        if (!resetSuccess) {
+            try {
+                this.debugLog('尝试方法2: setSignals组合控制');
+                
+                await this.port.setSignals({ 
+                    dataTerminalReady: false, 
+                    requestToSend: true 
+                });
+                await new Promise(resolve => setTimeout(resolve, config.rstDelay));
+                await this.port.setSignals({ 
+                    requestToSend: false 
+                });
+                await new Promise(resolve => setTimeout(resolve, config.postDelay));
+                
+                resetSuccess = true;
+                this.debugLog('✅ 方法2成功: setSignals组合控制');
+                
+            } catch (error) {
+                lastError = error;
+                this.debugLog(`❌ 方法2失败: ${error.message}`);
+            }
+        }
+        
+        // 方法3：分步setSignals控制（最大兼容性方法）
+        if (!resetSuccess) {
+            try {
+                this.debugLog('尝试方法3: 分步setSignals控制');
+                
+                // 分步设置，减少同时设置多个信号的兼容性问题
+                await this.port.setSignals({ dataTerminalReady: false });
+                await new Promise(resolve => setTimeout(resolve, 10));
+                await this.port.setSignals({ requestToSend: true });
+                await new Promise(resolve => setTimeout(resolve, config.rstDelay));
+                await this.port.setSignals({ requestToSend: false });
+                await new Promise(resolve => setTimeout(resolve, config.postDelay));
+                
+                resetSuccess = true;
+                this.debugLog('✅ 方法3成功: 分步setSignals控制');
+                
+            } catch (error) {
+                lastError = error;
+                this.debugLog(`❌ 方法3失败: ${error.message}`);
+            }
+        }
+        
+        // 如果所有方法都失败，记录警告但不中断流程
+        if (!resetSuccess) {
+            this.warningLog(`⚠️ 所有复位方法均失败，最后错误: ${lastError?.message}`);
+            this.warningLog('⚠️ 将尝试继续执行，但可能需要手动复位设备');
+            
+            // 给设备一个基本的延时，以防设备需要时间稳定
+            await new Promise(resolve => setTimeout(resolve, config.rstDelay));
+        } else {
+            this.debugLog(`✅ 设备复位成功 (平台: ${platform})`);
+        }
+        
+        // 无论复位是否成功，都清理串口缓冲区
+        try {
+            await this.clearBuffer();
+            this.debugLog('✅ 串口缓冲区已清理');
+        } catch (error) {
+            this.debugLog(`⚠️ 清理串口缓冲区失败: ${error.message}`);
+        }
+    }
+
+    /**
      * 步骤1：获取总线控制权 - 完全按照Python的get_bus逻辑
      * Python: max_try_count = 100, do_link_check_ex(max_try_count=60)
      */
@@ -275,11 +433,8 @@ class T5Downloader extends BaseDownloader {
                 this.commLog(`尝试 ${attempt}/${maxTryCount}`);
             }
             
-            // 复位设备 - 与Python do_reset一致
-            await this.port.setSignals({ dataTerminalReady: false, requestToSend: true });
-            await new Promise(resolve => setTimeout(resolve, 300)); // Python: time.sleep(0.3)
-            await this.port.setSignals({ requestToSend: false });
-            await new Promise(resolve => setTimeout(resolve, 4)); // Python: time.sleep(0.004)
+            // 复位设备 - 使用健壮的兼容性检测机制
+            await this.robustDeviceReset();
             
             // do_link_check_ex - 与Python一致，最多60次
             const linkCheckSuccess = await this.doLinkCheckEx(60);

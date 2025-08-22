@@ -386,6 +386,9 @@ class SerialTerminal {
             this.saveFlashLog();
         });
 
+        // T5AI调试工具事件
+        this.initializeT5AIDebugEvents();
+
         // 调试控件事件
         this.flashDebugMode.addEventListener('change', () => {
             this.toggleDebugMode();
@@ -3984,6 +3987,20 @@ class SerialTerminal {
             }
         }
         
+        // 控制T5AI调试工具区域的显示/隐藏
+        const t5aiDebugArea = document.getElementById('t5aiDebugArea');
+        if (t5aiDebugArea) {
+            if (selectedDevice === 'T5AI') {
+                // 显示T5AI调试工具
+                t5aiDebugArea.style.display = 'block';
+                this.debugLog('T5AI调试工具区域已显示');
+            } else {
+                // 隐藏T5AI调试工具（ESP32、T3等其他设备）
+                t5aiDebugArea.style.display = 'none';
+                this.debugLog('T5AI调试工具区域已隐藏');
+            }
+        }
+        
         this.debugLog('固件下载目标设备已选择:', selectedDevice);
     }
 
@@ -4156,6 +4173,181 @@ class SerialTerminal {
     saveAutoDisconnectAfterFlashState() {
         if (this.autoDisconnectAfterFlash) {
             localStorage.setItem('autoDisconnectAfterFlash', this.autoDisconnectAfterFlash.checked.toString());
+        }
+    }
+    
+    /**
+     * 初始化T5AI调试工具事件
+     */
+    initializeT5AIDebugEvents() {
+        const testResetBtn = document.getElementById('testResetBtn');
+        const testLinkCheckBtn = document.getElementById('testLinkCheckBtn'); 
+        const getChipInfoBtn = document.getElementById('getChipInfoBtn');
+        
+        if (testResetBtn) {
+            testResetBtn.addEventListener('click', () => {
+                this.handleT5AITestReset();
+            });
+        }
+        
+        if (testLinkCheckBtn) {
+            testLinkCheckBtn.addEventListener('click', () => {
+                this.handleT5AITestLinkCheck();
+            });
+        }
+        
+        if (getChipInfoBtn) {
+            getChipInfoBtn.addEventListener('click', () => {
+                this.handleT5AIGetChipInfo();
+            });
+        }
+        
+        // 监听串口连接状态变化，控制调试按钮的启用/禁用状态
+        this.eventBus.on('serial:connection-changed', (data) => {
+            this.updateT5AIDebugButtonsState(data.connected);
+        });
+    }
+    
+    /**
+     * 更新T5AI调试按钮的启用/禁用状态
+     */
+    updateT5AIDebugButtonsState(isConnected) {
+        const debugButtons = [
+            document.getElementById('testResetBtn'),
+            document.getElementById('testLinkCheckBtn'),
+            document.getElementById('getChipInfoBtn')
+        ];
+        
+        debugButtons.forEach(btn => {
+            if (btn) {
+                btn.disabled = !isConnected;
+            }
+        });
+    }
+    
+    /**
+     * 处理T5AI测试复位功能
+     */
+    async handleT5AITestReset() {
+        if (!this.serialManager.isConnected()) {
+            this.addToFlashLog('❌ 请先连接串口', 'error', true);
+            return;
+        }
+        
+        if (this.deviceSelect.value !== 'T5AI') {
+            this.addToFlashLog('❌ 请选择T5AI设备', 'error', true);
+            return;
+        }
+        
+        try {
+            this.addToFlashLog('🔄 开始测试T5AI设备复位...', 'info', true);
+            
+            // 创建T5AI下载器实例进行复位测试
+            const T5AIDownloader = window.downloaders?.T5AI || window.T5AIDownloader;
+            if (!T5AIDownloader) {
+                throw new Error('T5AI下载器未找到');
+            }
+            
+            const downloader = new T5AIDownloader(this.serialManager.port);
+            downloader.setEventBus(this.eventBus);
+            
+            // 调用健壮的复位方法
+            await downloader.robustDeviceReset();
+            
+            this.addToFlashLog('✅ T5AI设备复位测试完成', 'info', true);
+            
+        } catch (error) {
+            this.addToFlashLog(`❌ T5AI复位测试失败: ${error.message}`, 'error', true);
+            console.error('T5AI复位测试错误:', error);
+        }
+    }
+    
+    /**
+     * 处理T5AI测试链路检查功能
+     */
+    async handleT5AITestLinkCheck() {
+        if (!this.serialManager.isConnected()) {
+            this.addToFlashLog('❌ 请先连接串口', 'error', true);
+            return;
+        }
+        
+        if (this.deviceSelect.value !== 'T5AI') {
+            this.addToFlashLog('❌ 请选择T5AI设备', 'error', true);
+            return;
+        }
+        
+        try {
+            this.addToFlashLog('🔗 开始测试T5AI链路检查...', 'info', true);
+            
+            const T5AIDownloader = window.downloaders?.T5AI || window.T5AIDownloader;
+            if (!T5AIDownloader) {
+                throw new Error('T5AI下载器未找到');
+            }
+            
+            const downloader = new T5AIDownloader(this.serialManager.port);
+            downloader.setEventBus(this.eventBus);
+            
+            // 执行链路检查
+            const success = await downloader.doLinkCheckEx(10);
+            
+            if (success) {
+                this.addToFlashLog('✅ T5AI链路检查成功 - 设备响应正常', 'info', true);
+            } else {
+                this.addToFlashLog('⚠️ T5AI链路检查失败 - 设备可能未进入下载模式', 'warning', true);
+            }
+            
+        } catch (error) {
+            this.addToFlashLog(`❌ T5AI链路检查失败: ${error.message}`, 'error', true);
+            console.error('T5AI链路检查错误:', error);
+        }
+    }
+    
+    /**
+     * 处理T5AI获取芯片信息功能
+     */
+    async handleT5AIGetChipInfo() {
+        if (!this.serialManager.isConnected()) {
+            this.addToFlashLog('❌ 请先连接串口', 'error', true);
+            return;
+        }
+        
+        if (this.deviceSelect.value !== 'T5AI') {
+            this.addToFlashLog('❌ 请选择T5AI设备', 'error', true);
+            return;
+        }
+        
+        try {
+            this.addToFlashLog('🎯 开始获取T5AI芯片信息...', 'info', true);
+            
+            const T5AIDownloader = window.downloaders?.T5AI || window.T5AIDownloader;
+            if (!T5AIDownloader) {
+                throw new Error('T5AI下载器未找到');
+            }
+            
+            const downloader = new T5AIDownloader(this.serialManager.port);
+            downloader.setEventBus(this.eventBus);
+            
+            // 先进行复位和链路检查
+            await downloader.robustDeviceReset();
+            const linkCheck = await downloader.doLinkCheckEx(10);
+            
+            if (!linkCheck) {
+                throw new Error('无法建立与设备的链路连接');
+            }
+            
+            // 获取芯片ID
+            const chipId = await downloader.getChipId();
+            this.addToFlashLog(`📟 芯片ID: ${chipId}`, 'info', true);
+            
+            // 获取Flash ID
+            const flashInfo = await downloader.getFlashId();
+            this.addToFlashLog(`💾 Flash信息: ${flashInfo.name} (${flashInfo.size})`, 'info', true);
+            
+            this.addToFlashLog('✅ T5AI芯片信息获取完成', 'info', true);
+            
+        } catch (error) {
+            this.addToFlashLog(`❌ 获取T5AI芯片信息失败: ${error.message}`, 'error', true);
+            console.error('T5AI芯片信息获取错误:', error);
         }
     }
 }

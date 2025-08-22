@@ -89,6 +89,13 @@ const zh = {
     start_download: '开始烧录',
     stop_download: '结束烧录',
     auto_disconnect_after_flash: '完成烧录后自动断开串口',
+    
+    // T5AI调试工具
+    t5ai_debug_tools: '🔧 T5AI调试工具',
+    t5ai_debug_description: '用于诊断T5AI在Ubuntu/macOS平台的复位问题',
+    test_reset: '测试复位',
+    test_link_check: '测试链路检查',
+    get_chip_info: '获取芯片信息',
     preparing: '准备中...',
     downloaded: '已烧录',
     burn_log: '📋 烧录日志',

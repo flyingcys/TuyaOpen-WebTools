@@ -1096,6 +1096,50 @@ div.flash-controls {
     flex-wrap: wrap;
 }
 
+/* T5AI调试工具区域样式 */
+.debug-area {
+    background: linear-gradient(135deg, #f8fafc, #f1f5f9);
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 20px;
+    margin: 20px 0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.debug-header {
+    margin-bottom: 15px;
+    text-align: center;
+}
+
+.debug-header h4 {
+    margin: 0 0 5px 0;
+    color: #334155;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.debug-header small {
+    color: #64748b;
+    font-size: 12px;
+    display: block;
+    margin-top: 4px;
+}
+
+.debug-controls {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.debug-controls .btn {
+    flex: 1;
+    min-width: 140px;
+    max-width: 180px;
+    font-size: 13px;
+    padding: 10px 16px;
+}
+
 .btn-download {
     background: linear-gradient(135deg, #dc2626, #ef4444);
     color: white;
