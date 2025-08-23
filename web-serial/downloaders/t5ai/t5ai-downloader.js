@@ -1,33 +1,12 @@
 /**
- * T5AI芯片下载器 - 基于成功测试的逻辑实现
- * 完全按照t5-flash-test.html中调试成功的协议逻辑
- * 集成跨平台信号控制器解决Ubuntu兼容性问题
+ * T5AI芯片下载器 - 原子化重启+时间窗口抢占方案
+ * 解决Ubuntu下DTR/RTS时序问题，实现精确的烧录模式抢占
  */
 
 class T5Downloader extends BaseDownloader {
     constructor(serialPort, debugCallback, options = {}) {
         super(serialPort, debugCallback);
         this.chipName = 'T5AI';
-        
-        // 配置选项
-        this.options = {
-            enableSignalController: options.enableSignalController !== false, // 默认启用
-            preferredStrategy: options.preferredStrategy || 'auto',
-            debugSignalControl: options.debugSignalControl || false,
-            ...options
-        };
-        
-        // 初始化信号控制器
-        this.signalController = null;
-        if (this.options.enableSignalController) {
-            try {
-                // 动态加载信号控制器
-                this.initSignalController();
-            } catch (error) {
-                this.warningLog(`信号控制器初始化失败，回退到传统模式: ${error.message}`);
-                this.options.enableSignalController = false;
-            }
-        }
         
         // Flash芯片数据库 - 完全按照测试版本的数据
         this.flashDatabase = {
@@ -76,59 +55,6 @@ class T5Downloader extends BaseDownloader {
         this.chipId = null;
         this.flashId = null;
         this.flashConfig = null;
-    }
-
-    /**
-     * 初始化信号控制器
-     */
-    initSignalController() {
-        try {
-            // 检查是否已加载T5AISignalController类
-            if (typeof T5AISignalController === 'undefined') {
-                // 尝试动态加载
-                if (typeof require !== 'undefined') {
-                    const T5AISignalController = require('./T5AISignalController.js');
-                    this.signalController = new T5AISignalController(this.getSerialManager(), this);
-                } else {
-                    throw new Error('T5AISignalController类未加载');
-                }
-            } else {
-                this.signalController = new T5AISignalController(this.getSerialManager(), this);
-            }
-            
-            this.debugLog('信号控制器初始化成功');
-        } catch (error) {
-            this.warningLog(`信号控制器初始化失败: ${error.message}`);
-            throw error;
-        }
-    }
-
-    /**
-     * 获取串口管理器实例
-     * 从全局范围获取SerialManager实例
-     */
-    getSerialManager() {
-        // 尝试从全局范围获取SerialManager
-        if (typeof window !== 'undefined' && window.serialManager) {
-            return window.serialManager;
-        }
-        
-        // 如果没有全局SerialManager，尝试从其他地方获取
-        if (typeof serialManager !== 'undefined') {
-            return serialManager;
-        }
-        
-        throw new Error('未找到SerialManager实例，请确保在初始化T5AI下载器前初始化SerialManager');
-    }
-
-    /**
-     * 获取信号控制器性能统计
-     */
-    getSignalControllerMetrics() {
-        if (this.signalController) {
-            return this.signalController.getMetrics();
-        }
-        return null;
     }
 
     /**
@@ -337,108 +263,246 @@ class T5Downloader extends BaseDownloader {
     }
 
     /**
-     * 步骤1：获取总线控制权 - 集成信号控制器实现跨平台兼容
-     * Python: max_try_count = 100, do_link_check_ex(max_try_count=60)
+     * 步骤1：获取总线控制权 - 原子化重启+时间窗口抢占
+     * 关键：重启后立即在时间窗口内发送LinkCheck，不能有任何延迟
      */
     async getBusControl() {
         this.mainLog('=== 步骤1: 获取总线控制权 ===');
         
-        const maxTryCount = 100; // 与Python保持一致
+        const maxTryCount = 20; // 减少重试次数，因为每次都是原子化操作
         for (let attempt = 1; attempt <= maxTryCount && !this.stopFlag; attempt++) {
-            if (attempt % 10 === 1) {  // 每10次尝试输出一次日志
-                this.commLog(`尝试 ${attempt}/${maxTryCount}`);
-            }
+            this.commLog(`尝试 ${attempt}/${maxTryCount}`);
             
-            // 🔧 使用信号控制器进行设备复位（跨平台兼容）
             try {
-                await this.resetDeviceWithController();
-            } catch (resetError) {
-                this.debugLog(`复位失败 (尝试${attempt}): ${resetError.message}`);
+                // 🎯 执行原子化的重启+时间窗口抢占
+                const result = await this.atomicResetAndCapture();
                 
-                // 每20次尝试输出一次警告
-                if (attempt % 20 === 0) {
-                    this.warningLog(`复位问题持续出现，已尝试${attempt}次`);
+                if (result.success) {
+                    this.mainLog(`✅ 第${attempt}次尝试成功获取总线控制权`);
+                    this.infoLog(`抢占时间: ${result.captureTime}ms，尝试次数: ${result.attempts}`);
+                    return true;
+                } else {
+                    // 分析失败原因
+                    if (result.reason === 'window_missed') {
+                        this.warningLog(`第${attempt}次: 错过时间窗口，设备进入应用程序模式`);
+                    } else if (result.reason === 'window_timeout') {
+                        this.warningLog(`第${attempt}次: 超过时间窗口，可能重启不彻底`);
+                    } else {
+                        this.warningLog(`第${attempt}次: ${result.reason || '未知原因'}`);
+                    }
                 }
                 
-                continue; // 继续下一次尝试
+            } catch (error) {
+                this.debugLog(`第${attempt}次原子化重启失败: ${error.message}`);
             }
             
-            // do_link_check_ex - 与Python一致，最多60次
-            const linkCheckSuccess = await this.doLinkCheckEx(60);
-            if (linkCheckSuccess) {
-                this.mainLog(`✅ 第${attempt}次尝试成功获取总线控制权`);
-                
-                // 输出信号控制器统计信息
-                if (this.signalController && this.options.debugSignalControl) {
-                    const metrics = this.signalController.getMetrics();
-                    this.debugLog('信号控制器性能统计', metrics);
-                }
-                
-                return true;
+            // 失败后等待一段时间再重试，给设备时间稳定
+            if (attempt < maxTryCount) {
+                await new Promise(resolve => setTimeout(resolve, 200));
             }
         }
         
-        // 所有尝试都失败时，输出详细的诊断信息
-        this.errorLog('获取总线控制权失败，诊断信息：');
-        if (this.signalController) {
-            const metrics = this.signalController.getMetrics();
-            this.errorLog(`信号控制统计: ${JSON.stringify(metrics, null, 2)}`);
-        }
-        
+        this.errorLog(`获取总线控制权失败，已尝试${maxTryCount}次原子化重启`);
         return false;
     }
 
     /**
-     * 使用信号控制器进行设备复位
+     * 原子化重启+时间窗口抢占（核心方法）
+     * 关键：重启信号释放后立即进入高频LinkCheck发送，抢占时间窗口
      */
-    async resetDeviceWithController() {
-        if (this.options.enableSignalController && this.signalController) {
-            // 使用新的信号控制器
-            const resetResult = await this.signalController.resetDevice(this.options.preferredStrategy);
+    async atomicResetAndCapture() {
+        const startTime = Date.now();
+        
+        // 检测平台并选择最佳重启策略
+        const platform = this.detectPlatform();
+        this.debugLog(`检测到平台: ${platform}`);
+        
+        try {
+            // 1. 清空缓冲区
+            await this.clearBuffer();
             
-            if (this.options.debugSignalControl) {
-                this.debugLog('信号控制器复位结果', resetResult);
+            // 2. 执行平台特定的重启序列
+            if (platform === 'ubuntu') {
+                await this.resetForUbuntu();
+            } else if (platform === 'macos') {
+                await this.resetForMacOS();
+            } else {
+                await this.resetForWindows();
             }
             
-            return resetResult;
-        } else {
-            // 回退到传统方式
-            await this.resetDeviceTraditional();
+            // 3. 立即进入时间窗口抢占（这是关键！）
+            const captureResult = await this.captureBootloaderWindow();
+            
+            return {
+                success: captureResult.success,
+                captureTime: Date.now() - startTime,
+                attempts: captureResult.attempts,
+                reason: captureResult.reason,
+                platform: platform
+            };
+            
+        } catch (error) {
+            return {
+                success: false,
+                reason: `重启失败: ${error.message}`,
+                platform: platform
+            };
         }
     }
 
     /**
-     * 传统的设备复位方式（保持向后兼容）
+     * 检测运行平台
      */
-    async resetDeviceTraditional() {
-        // 复位设备 - 与Python do_reset一致
-        await this.port.setSignals({ dataTerminalReady: false, requestToSend: true });
-        await new Promise(resolve => setTimeout(resolve, 300)); // Python: time.sleep(0.3)
+    detectPlatform() {
+        const userAgent = navigator.userAgent.toLowerCase();
+        if (userAgent.includes('linux')) {
+            return 'ubuntu';
+        } else if (userAgent.includes('mac')) {
+            return 'macos';
+        } else {
+            return 'windows';
+        }
+    }
+    
+    /**
+     * Ubuntu优化的重启序列
+     * 针对Linux串口驱动优化DTR/RTS时序
+     */
+    async resetForUbuntu() {
+        this.debugLog('执行Ubuntu优化重启序列...');
+        
+        // 分离控制，避免Linux驱动问题
+        await this.port.setSignals({ dataTerminalReady: false });
+        await this.delay(50);  // 给DTR信号时间稳定
+        
+        await this.port.setSignals({ requestToSend: true });
+        await this.delay(200); // Ubuntu下需要更长的复位保持时间
+        
+        // 释放复位信号，设备开始重启
         await this.port.setSignals({ requestToSend: false });
-        await new Promise(resolve => setTimeout(resolve, 4)); // Python: time.sleep(0.004)
+        // 注意：这里不再等待！立即开始窗口抢占
+    }
+    
+    /**
+     * macOS优化的重启序列
+     */
+    async resetForMacOS() {
+        this.debugLog('执行macOS优化重启序列...');
+        
+        // macOS下DTR控制更可靠
+        await this.port.setSignals({ dataTerminalReady: false });
+        await this.delay(300);
+        await this.port.setSignals({ dataTerminalReady: true });
+        await this.delay(50);
+    }
+    
+    /**
+     * Windows标准重启序列
+     */
+    async resetForWindows() {
+        this.debugLog('执行Windows标准重启序列...');
+        
+        // Windows下的标准控制
+        await this.port.setSignals({ dataTerminalReady: false, requestToSend: true });
+        await this.delay(300);
+        await this.port.setSignals({ requestToSend: false });
+        // Windows下稍微等待，但时间很短
+        await this.delay(4);
+    }
+    
+    /**
+     * 延迟函数
+     */
+    delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
     }
 
     /**
-     * do_link_check_ex - 完全按照Python版本实现
-     * Python: max_try_count=60, timeout_sec=0.001
+     * 时间窗口抢占（核心方法）
+     * 在设备重启后的关键时间窗口内高频发送LinkCheck
      */
-    async doLinkCheckEx(maxTryCount = 60) {
-        for (let cnt = 0; cnt < maxTryCount && !this.stopFlag; cnt++) {
-                await this.clearBuffer();
-                await this.sendCommand([0x01, 0xE0, 0xFC, 0x01, 0x00], 'LinkCheck');
+    async captureBootloaderWindow() {
+        const windowStartTime = Date.now();
+        const maxWindowTime = 500;  // T5设备的时间窗口约500ms
+        const attemptInterval = 10;   // 每10ms尝试一次，高频抢占
+        
+        this.debugLog(`开始时间窗口抢占，窗口大小: ${maxWindowTime}ms`);
+        
+        let attempts = 0;
+        while (Date.now() - windowStartTime < maxWindowTime && !this.stopFlag) {
+            attempts++;
+            
+            try {
+                // 立即发送LinkCheck，不清空缓冲区节省时间
+                await this.sendCommand([0x01, 0xE0, 0xFC, 0x01, 0x00], `WindowCapture_${attempts}`);
                 
-            // Python使用0.001秒超时，即1毫秒
-            const response = await this.receiveResponse(8, 1);
+                // 使用短超时检查响应
+                const response = await this.receiveResponse(8, 20); // 20ms超时
+                
                 if (response.length >= 8) {
                     const r = response.slice(0, 8);
+                    
+                    // 检查T5AI协议响应（成功进入烧录模式）
                     if (r[0] === 0x04 && r[1] === 0x0E && r[2] === 0x05 && 
                         r[3] === 0x01 && r[4] === 0xE0 && r[5] === 0xFC && 
                         r[6] === 0x01 && r[7] === 0x00) {
-                        return true;
+                        
+                        const captureTime = Date.now() - windowStartTime;
+                        this.infoLog(`✅ 成功抢占烧录模式时间窗口! 第${attempts}次尝试，耗时${captureTime}ms`);
+                        
+                        return {
+                            success: true,
+                            attempts: attempts,
+                            captureTime: captureTime
+                        };
+                    }
+                    
+                    // 检查是否是应用程序模式响应（错过时间窗口）
+                    if (this.isATModeResponse(response)) {
+                        const missedTime = Date.now() - windowStartTime;
+                        this.warningLog(`⚠️ 错过烧录模式时间窗口，设备已进入应用程序模式 (耗时${missedTime}ms)`);
+                        
+                        return {
+                            success: false,
+                            attempts: attempts,
+                            reason: 'window_missed'
+                        };
                     }
                 }
+                
+                // 等待下一次尝试
+                await this.delay(attemptInterval);
+                
+            } catch (error) {
+                // 发送或接收错误，继续尝试
+                this.debugLog(`窗口抢占尝试${attempts}失败: ${error.message}`);
+                await this.delay(attemptInterval);
             }
-        return false;
+        }
+        
+        // 超过最大窗口时间
+        this.warningLog(`⚠️ 超过最大窗口时间(${maxWindowTime}ms)，未能抢占烧录模式`);
+        
+        return {
+            success: false,
+            attempts: attempts,
+            reason: 'window_timeout'
+        };
+    }
+
+    /**
+     * 检测响应是否为AT模式（应用程序模式）
+     */
+    isATModeResponse(response) {
+        if (!response || response.length < 4) {
+            return false;
+        }
+        
+        // 检测是否包含 "tuya>", "OK", "ERROR" 等AT模式关键字
+        const responseStr = Array.from(response).map(b => String.fromCharCode(b)).join('');
+        const atPatterns = ['tuya>', 'OK', 'ERROR', '+', 'AT'];
+        
+        return atPatterns.some(pattern => responseStr.includes(pattern));
     }
 
     /**
