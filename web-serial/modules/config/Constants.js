@@ -16,12 +16,12 @@ window.DEVICE_BAUDRATE_CONFIG = {
     'LN882H': { baudrate: 921600, readonly: true }
 };
 
-// Ubuntu平台波特率兼容性配置
+// Ubuntu平台波特率兼容性配置 - 已更新以支持高波特率测试
 window.UBUNTU_BAUDRATE_COMPATIBILITY = {
-    supported: [115200, 230400, 460800, 921600],    // 完全支持的标准波特率
-    unsupported: [1152000, 1500000, 2000000, 3000000], // 不支持的非标准波特率
+    supported: [115200, 230400, 460800, 921600, 1152000, 1500000, 2000000, 3000000],    // 支持所有波特率用于测试
+    unsupported: [], // 清空不支持列表，允许测试所有波特率
     recommended: 921600,                              // 推荐波特率
-    fallback: 921600                                 // 默认降级波特率
+    fallback: 921600                                 // 默认降级波特率（保留但不会使用）
 };
 
 // ANSI颜色映射表
