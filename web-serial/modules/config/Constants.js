@@ -6,7 +6,7 @@
 // 设备波特率配置
 window.DEVICE_BAUDRATE_CONFIG = {
     'custom': { baudrate: 115200, readonly: false },
-    'T5AI': { baudrate: 921600, readonly: true },
+    'T5AI': { baudrate: 921600, readonly: true },  // 已调整为Ubuntu兼容
     'T3': { baudrate: 921600, readonly: true },
     'T2': { baudrate: 115200, readonly: true },
     'ESP32': { baudrate: 115200, readonly: true },
@@ -14,6 +14,14 @@ window.DEVICE_BAUDRATE_CONFIG = {
     'ESP32S3': { baudrate: 115200, readonly: true },
     'BK7231N': { baudrate: 115200, readonly: true },
     'LN882H': { baudrate: 921600, readonly: true }
+};
+
+// Ubuntu平台波特率兼容性配置
+window.UBUNTU_BAUDRATE_COMPATIBILITY = {
+    supported: [115200, 230400, 460800, 921600],    // 完全支持的标准波特率
+    unsupported: [1152000, 1500000, 2000000, 3000000], // 不支持的非标准波特率
+    recommended: 921600,                              // 推荐波特率
+    fallback: 921600                                 // 默认降级波特率
 };
 
 // ANSI颜色映射表
