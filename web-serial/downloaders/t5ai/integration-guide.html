@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>T5AI跨平台解决方案集成指南</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #555;
+            margin-top: 30px;
+        }
+        .code-block {
+            background: #f4f4f4;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 15px 0;
+            overflow-x: auto;
+        }
+        .code-block code {
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+        }
+        .button-group {
+            margin: 20px 0;
+        }
+        .button-group button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .button-group button:hover {
+            background: #45a049;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        .platform-info {
+            background: #e7f3ff;
+            border: 1px solid #b3d9ff;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>T5AI跨平台串口复位解决方案 - 集成指南</h1>
+        
+        <div class="platform-info">
+            <h3>当前平台信息</h3>
+            <p><strong>操作系统:</strong> <span id="os-platform">检测中...</span></p>
+            <p><strong>用户代理:</strong> <span id="user-agent">检测中...</span></p>
+            <p><strong>推荐策略:</strong> <span id="recommended-strategy">检测中...</span></p>
+        </div>
+
+        <h2>1. 在现有项目中集成</h2>
+        <p>在您的HTML文件中添加以下脚本引用（按顺序）：</p>
+        
+        <div class="code-block">
+            <code>&lt;!-- T5AI跨平台支持 --&gt;<br>
+&lt;script src="downloaders/t5ai/T5AISignalController.js"&gt;&lt;/script&gt;<br>
+&lt;script src="downloaders/t5ai/T5AITransport.js"&gt;&lt;/script&gt;<br>
+&lt;script src="downloaders/t5ai/t5ai-downloader.js"&gt;&lt;/script&gt;<br>
+<br>
+&lt;!-- 可选：测试工具 --&gt;<br>
+&lt;script src="downloaders/t5ai/T5AISignalControllerTester.js"&gt;&lt;/script&gt;</code>
+        </div>
+
+        <h2>2. 快速测试</h2>
+        <div class="button-group">
+            <button onclick="loadScripts()">加载T5AI跨平台脚本</button>
+            <button onclick="testConnection()">测试串口连接</button>
+            <button onclick="startTester()">启动测试工具</button>
+        </div>
+        
+        <div id="test-status"></div>
+
+        <h2>3. 代码示例</h2>
+        
+        <h3>基本使用</h3>
+        <div class="code-block">
+            <code>// 创建T5AI下载器<br>
+const downloader = new T5Downloader(serialPort, (level, message) => {<br>
+&nbsp;&nbsp;console.log(`[${level}] ${message}`);<br>
+});<br>
+<br>
+// 连接设备（自动处理跨平台复位）<br>
+await downloader.connect();<br>
+<br>
+// 下载固件<br>
+await downloader.downloadFirmware(firmwareData, 0x00000000);</code>
+        </div>
+
+        <h3>高级配置</h3>
+        <div class="code-block">
+            <code>// 手动控制Transport层<br>
+const transport = new T5AITransport(serialPort, debugCallback);<br>
+await transport.connect();<br>
+<br>
+// 执行跨平台复位<br>
+await transport.reset();<br>
+<br>
+// 获取平台信息<br>
+const platformInfo = transport.getPlatformInfo();<br>
+console.log('平台:', platformInfo.platform);</code>
+        </div>
+
+        <h2>4. 验证步骤</h2>
+        <ol>
+            <li>加载脚本（点击上方"加载T5AI跨平台脚本"按钮）</li>
+            <li>连接T5AI设备到USB端口</li>
+            <li>点击"测试串口连接"验证基本功能</li>
+            <li>使用"启动测试工具"进行深入测试</li>
+        </ol>
+
+        <h2>5. 故障排除</h2>
+        <div class="status info">
+            <strong>提示:</strong> 如果在Ubuntu上遇到问题，请确保：
+            <ul>
+                <li>用户在dialout组中: <code>sudo usermod -a -G dialout $USER</code></li>
+                <li>注销并重新登录生效</li>
+                <li>使用Chrome/Edge浏览器（Firefox不支持Web Serial API）</li>
+            </ul>
+        </div>
+
+        <h2>6. 日志输出</h2>
+        <div class="code-block" id="log-output" style="height: 200px; overflow-y: auto;">
+            <code>日志输出将显示在这里...</code>
+        </div>
+    </div>
+
+    <script>
+        // 检测平台信息
+        function detectPlatform() {
+            const platform = navigator.platform.toLowerCase();
+            const userAgent = navigator.userAgent;
+            
+            let os = 'Unknown';
+            let strategy = 'standard';
+            
+            if (platform.indexOf('win') !== -1) {
+                os = 'Windows';
+                strategy = 'standard';
+            } else if (userAgent.toLowerCase().indexOf('ubuntu') !== -1) {
+                os = 'Ubuntu';
+                strategy = 'separated';
+            } else if (platform.indexOf('linux') !== -1) {
+                os = 'Linux';
+                strategy = 'separated';
+            } else if (platform.indexOf('mac') !== -1) {
+                os = 'macOS';
+                strategy = 'dtr_only';
+            }
+            
+            document.getElementById('os-platform').textContent = os;
+            document.getElementById('user-agent').textContent = userAgent.substring(0, 100) + '...';
+            document.getElementById('recommended-strategy').textContent = strategy + ' - ' + getStrategyDescription(strategy);
+        }
+        
+        function getStrategyDescription(strategy) {
+            const descriptions = {
+                'standard': '标准DTR+RTS组合控制',
+                'separated': '分离DTR/RTS控制',
+                'dtr_only': 'DTR单独控制',
+                'rts_only': 'RTS单独控制',
+                'extended_timing': '扩展时序控制'
+            };
+            return descriptions[strategy] || '未知策略';
+        }
+        
+        // 加载脚本
+        async function loadScripts() {
+            const scripts = [
+                'T5AISignalController.js',
+                'T5AITransport.js',
+                'T5AISignalControllerTester.js'
+            ];
+            
+            const statusDiv = document.getElementById('test-status');
+            statusDiv.innerHTML = '';
+            
+            for (const script of scripts) {
+                try {
+                    await loadScript(script);
+                    addStatus(`✅ 已加载 ${script}`, 'success');
+                } catch (error) {
+                    addStatus(`❌ 加载失败 ${script}: ${error.message}`, 'error');
+                }
+            }
+            
+            // 验证加载
+            if (typeof T5AISignalController !== 'undefined' && 
+                typeof T5AITransport !== 'undefined') {
+                addStatus('✅ 所有组件加载成功！', 'success');
+                logMessage('T5AI跨平台组件已就绪');
+            }
+        }
+        
+        function loadScript(filename) {
+            return new Promise((resolve, reject) => {
+                // 检查是否已加载
+                if (filename === 'T5AISignalController.js' && typeof T5AISignalController !== 'undefined') {
+                    resolve();
+                    return;
+                }
+                if (filename === 'T5AITransport.js' && typeof T5AITransport !== 'undefined') {
+                    resolve();
+                    return;
+                }
+                
+                const script = document.createElement('script');
+                script.src = filename;
+                script.onload = resolve;
+                script.onerror = () => reject(new Error('Script load failed'));
+                document.head.appendChild(script);
+            });
+        }
+        
+        // 测试连接
+        async function testConnection() {
+            const statusDiv = document.getElementById('test-status');
+            statusDiv.innerHTML = '';
+            
+            try {
+                // 检查Web Serial API
+                if (!('serial' in navigator)) {
+                    throw new Error('浏览器不支持Web Serial API');
+                }
+                
+                // 请求串口
+                const port = await navigator.serial.requestPort();
+                addStatus('✅ 串口选择成功', 'success');
+                
+                // 打开串口
+                await port.open({ baudRate: 115200 });
+                addStatus('✅ 串口打开成功', 'success');
+                
+                // 创建信号控制器测试
+                if (typeof T5AISignalController !== 'undefined') {
+                    const controller = new T5AISignalController(port, (level, message) => {
+                        logMessage(`[${level}] ${message}`);
+                    });
+                    
+                    addStatus('✅ 信号控制器创建成功', 'success');
+                    
+                    // 执行复位测试
+                    addStatus('正在测试复位...', 'info');
+                    const resetSuccess = await controller.executeReset();
+                    
+                    if (resetSuccess) {
+                        addStatus('✅ 复位测试成功！', 'success');
+                    } else {
+                        addStatus('⚠️ 复位测试失败，请查看日志', 'error');
+                    }
+                }
+                
+                // 关闭串口
+                await port.close();
+                addStatus('串口已关闭', 'info');
+                
+            } catch (error) {
+                addStatus(`❌ 测试失败: ${error.message}`, 'error');
+                logMessage(`错误: ${error.message}`);
+            }
+        }
+        
+        // 启动测试工具
+        function startTester() {
+            if (typeof startT5AITester === 'function') {
+                startT5AITester();
+                addStatus('✅ 测试工具已启动', 'success');
+            } else {
+                addStatus('❌ 测试工具未加载，请先加载脚本', 'error');
+            }
+        }
+        
+        // 添加状态消息
+        function addStatus(message, type) {
+            const statusDiv = document.getElementById('test-status');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `status ${type}`;
+            messageDiv.textContent = message;
+            statusDiv.appendChild(messageDiv);
+        }
+        
+        // 日志消息
+        function logMessage(message) {
+            const logDiv = document.getElementById('log-output');
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = `[${timestamp}] ${message}\n`;
+            
+            if (logDiv.querySelector('code').textContent === '日志输出将显示在这里...') {
+                logDiv.querySelector('code').textContent = logEntry;
+            } else {
+                logDiv.querySelector('code').textContent += logEntry;
+            }
+            
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        // 页面加载时检测平台
+        detectPlatform();
+    </script>
+</body>
+</html>
