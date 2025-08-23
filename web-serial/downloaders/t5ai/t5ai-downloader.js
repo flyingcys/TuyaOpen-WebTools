@@ -1,12 +1,33 @@
 /**
  * T5AI芯片下载器 - 基于成功测试的逻辑实现
  * 完全按照t5-flash-test.html中调试成功的协议逻辑
+ * 集成跨平台信号控制器解决Ubuntu兼容性问题
  */
 
 class T5Downloader extends BaseDownloader {
-    constructor(serialPort, debugCallback) {
+    constructor(serialPort, debugCallback, options = {}) {
         super(serialPort, debugCallback);
         this.chipName = 'T5AI';
+        
+        // 配置选项
+        this.options = {
+            enableSignalController: options.enableSignalController !== false, // 默认启用
+            preferredStrategy: options.preferredStrategy || 'auto',
+            debugSignalControl: options.debugSignalControl || false,
+            ...options
+        };
+        
+        // 初始化信号控制器
+        this.signalController = null;
+        if (this.options.enableSignalController) {
+            try {
+                // 动态加载信号控制器
+                this.initSignalController();
+            } catch (error) {
+                this.warningLog(`信号控制器初始化失败，回退到传统模式: ${error.message}`);
+                this.options.enableSignalController = false;
+            }
+        }
         
         // Flash芯片数据库 - 完全按照测试版本的数据
         this.flashDatabase = {
@@ -55,6 +76,59 @@ class T5Downloader extends BaseDownloader {
         this.chipId = null;
         this.flashId = null;
         this.flashConfig = null;
+    }
+
+    /**
+     * 初始化信号控制器
+     */
+    initSignalController() {
+        try {
+            // 检查是否已加载T5AISignalController类
+            if (typeof T5AISignalController === 'undefined') {
+                // 尝试动态加载
+                if (typeof require !== 'undefined') {
+                    const T5AISignalController = require('./T5AISignalController.js');
+                    this.signalController = new T5AISignalController(this.getSerialManager(), this);
+                } else {
+                    throw new Error('T5AISignalController类未加载');
+                }
+            } else {
+                this.signalController = new T5AISignalController(this.getSerialManager(), this);
+            }
+            
+            this.debugLog('信号控制器初始化成功');
+        } catch (error) {
+            this.warningLog(`信号控制器初始化失败: ${error.message}`);
+            throw error;
+        }
+    }
+
+    /**
+     * 获取串口管理器实例
+     * 从全局范围获取SerialManager实例
+     */
+    getSerialManager() {
+        // 尝试从全局范围获取SerialManager
+        if (typeof window !== 'undefined' && window.serialManager) {
+            return window.serialManager;
+        }
+        
+        // 如果没有全局SerialManager，尝试从其他地方获取
+        if (typeof serialManager !== 'undefined') {
+            return serialManager;
+        }
+        
+        throw new Error('未找到SerialManager实例，请确保在初始化T5AI下载器前初始化SerialManager');
+    }
+
+    /**
+     * 获取信号控制器性能统计
+     */
+    getSignalControllerMetrics() {
+        if (this.signalController) {
+            return this.signalController.getMetrics();
+        }
+        return null;
     }
 
     /**
@@ -263,7 +337,7 @@ class T5Downloader extends BaseDownloader {
     }
 
     /**
-     * 步骤1：获取总线控制权 - 完全按照Python的get_bus逻辑
+     * 步骤1：获取总线控制权 - 集成信号控制器实现跨平台兼容
      * Python: max_try_count = 100, do_link_check_ex(max_try_count=60)
      */
     async getBusControl() {
@@ -275,21 +349,73 @@ class T5Downloader extends BaseDownloader {
                 this.commLog(`尝试 ${attempt}/${maxTryCount}`);
             }
             
-            // 复位设备 - 与Python do_reset一致
-            await this.port.setSignals({ dataTerminalReady: false, requestToSend: true });
-            await new Promise(resolve => setTimeout(resolve, 300)); // Python: time.sleep(0.3)
-            await this.port.setSignals({ requestToSend: false });
-            await new Promise(resolve => setTimeout(resolve, 4)); // Python: time.sleep(0.004)
+            // 🔧 使用信号控制器进行设备复位（跨平台兼容）
+            try {
+                await this.resetDeviceWithController();
+            } catch (resetError) {
+                this.debugLog(`复位失败 (尝试${attempt}): ${resetError.message}`);
+                
+                // 每20次尝试输出一次警告
+                if (attempt % 20 === 0) {
+                    this.warningLog(`复位问题持续出现，已尝试${attempt}次`);
+                }
+                
+                continue; // 继续下一次尝试
+            }
             
             // do_link_check_ex - 与Python一致，最多60次
             const linkCheckSuccess = await this.doLinkCheckEx(60);
             if (linkCheckSuccess) {
                 this.mainLog(`✅ 第${attempt}次尝试成功获取总线控制权`);
+                
+                // 输出信号控制器统计信息
+                if (this.signalController && this.options.debugSignalControl) {
+                    const metrics = this.signalController.getMetrics();
+                    this.debugLog('信号控制器性能统计', metrics);
+                }
+                
                 return true;
             }
         }
         
+        // 所有尝试都失败时，输出详细的诊断信息
+        this.errorLog('获取总线控制权失败，诊断信息：');
+        if (this.signalController) {
+            const metrics = this.signalController.getMetrics();
+            this.errorLog(`信号控制统计: ${JSON.stringify(metrics, null, 2)}`);
+        }
+        
         return false;
+    }
+
+    /**
+     * 使用信号控制器进行设备复位
+     */
+    async resetDeviceWithController() {
+        if (this.options.enableSignalController && this.signalController) {
+            // 使用新的信号控制器
+            const resetResult = await this.signalController.resetDevice(this.options.preferredStrategy);
+            
+            if (this.options.debugSignalControl) {
+                this.debugLog('信号控制器复位结果', resetResult);
+            }
+            
+            return resetResult;
+        } else {
+            // 回退到传统方式
+            await this.resetDeviceTraditional();
+        }
+    }
+
+    /**
+     * 传统的设备复位方式（保持向后兼容）
+     */
+    async resetDeviceTraditional() {
+        // 复位设备 - 与Python do_reset一致
+        await this.port.setSignals({ dataTerminalReady: false, requestToSend: true });
+        await new Promise(resolve => setTimeout(resolve, 300)); // Python: time.sleep(0.3)
+        await this.port.setSignals({ requestToSend: false });
+        await new Promise(resolve => setTimeout(resolve, 4)); // Python: time.sleep(0.004)
     }
 
     /**
