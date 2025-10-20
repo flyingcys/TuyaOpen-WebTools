@@ -278,7 +278,7 @@ class T5Downloader extends BaseDownloader {
             // 复位设备 - 与Python do_reset一致
             await this.port.setSignals({ dataTerminalReady: false, requestToSend: true });
             await new Promise(resolve => setTimeout(resolve, 300)); // Python: time.sleep(0.3)
-            await this.port.setSignals({ requestToSend: false });
+            await this.port.setSignals({ dataTerminalReady: true, requestToSend: false });
             await new Promise(resolve => setTimeout(resolve, 4)); // Python: time.sleep(0.004)
             
             // do_link_check_ex - 与Python一致，最多60次
@@ -907,7 +907,13 @@ class T5Downloader extends BaseDownloader {
             stopBits: 1,
             parity: 'none'
         });
-        
+
+        try {
+            await this.port.setSignals({ dataTerminalReady: true, requestToSend: false });
+        } catch (signalError) {
+            this.debugLog(`设置串口信号失败: ${signalError.message}`);
+        }
+
         // 期望响应长度: rx_expect_length(5) = len([0x04, 0x0e]) + 1 + len([0x01, 0xe0, 0xfc]) + 1 + 5 = 2 + 1 + 3 + 1 + 5 = 12
         const response = await this.receiveResponse(12, delayMs + 500);
         
@@ -1340,6 +1346,12 @@ class T5Downloader extends BaseDownloader {
                         stopBits: 1,
                         parity: 'none'
                     });
+
+                    try {
+                        await this.port.setSignals({ dataTerminalReady: true, requestToSend: false });
+                    } catch (signalError) {
+                        this.debug('warning', `设置串口信号失败: ${signalError.message}`);
+                    }
                     this.currentBaudrate = 115200;
                     this.debug('info', '✅ 串口已直接重置到115200');
                 }
@@ -2333,7 +2345,13 @@ class T5Downloader extends BaseDownloader {
                 stopBits: 1,
                 parity: 'none'
             });
-            
+
+            try {
+                await this.port.setSignals({ dataTerminalReady: true, requestToSend: false });
+            } catch (signalError) {
+                this.debug('warning', `设置串口信号失败: ${signalError.message}`);
+            }
+
             this.currentBaudrate = targetBaudrate;
             this.debug('info', `✅ 串口重置完成，波特率: ${targetBaudrate}`);
             

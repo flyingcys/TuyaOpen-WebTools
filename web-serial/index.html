@@ -26,49 +26,38 @@
                 <div class="language-switcher">
                     <div class="lang-dropdown" id="langDropdown">
                         <button class="lang-dropdown-btn" id="langDropdownBtn" title="切换语言 / Switch Language">
-                            <span class="lang-flag" id="currentLangFlag">🇨🇳</span>
                             <span class="lang-name" id="currentLangName">简体中文</span>
                             <span class="dropdown-arrow">▼</span>
                         </button>
                         <div class="lang-dropdown-menu" id="langDropdownMenu">
                             <div class="lang-option" data-lang="zh">
-                                <span class="lang-flag">🇨🇳</span>
                                 <span class="lang-name">简体中文</span>
                             </div>
                             <div class="lang-option" data-lang="zh-tw">
-                                <span class="lang-flag">🇹🇼</span>
                                 <span class="lang-name">繁體中文</span>
                             </div>
                             <div class="lang-option" data-lang="en">
-                                <span class="lang-flag">🇺🇸</span>
                                 <span class="lang-name">English</span>
                             </div>
                             <div class="lang-option" data-lang="fr">
-                                <span class="lang-flag">🇫🇷</span>
                                 <span class="lang-name">Français</span>
                             </div>
                             <div class="lang-option" data-lang="de">
-                                <span class="lang-flag">🇩🇪</span>
                                 <span class="lang-name">Deutsch</span>
                             </div>
                             <div class="lang-option" data-lang="es">
-                                <span class="lang-flag">🇪🇸</span>
                                 <span class="lang-name">Español</span>
                             </div>
                             <div class="lang-option" data-lang="ja">
-                                <span class="lang-flag">🇯🇵</span>
                                 <span class="lang-name">日本語</span>
                             </div>
                             <div class="lang-option" data-lang="ko">
-                                <span class="lang-flag">🇰🇷</span>
                                 <span class="lang-name">한국어</span>
                             </div>
                             <div class="lang-option" data-lang="ru">
-                                <span class="lang-flag">🇷🇺</span>
                                 <span class="lang-name">Русский</span>
                             </div>
                             <div class="lang-option" data-lang="pt">
-                                <span class="lang-flag">🇵🇹</span>
                                 <span class="lang-name">Português</span>
                             </div>
                         </div>
@@ -880,26 +869,24 @@
         
         // 更新语言显示
         function updateLanguageDisplay(lang) {
-            const flagElement = document.getElementById('currentLangFlag');
             const nameElement = document.getElementById('currentLangName');
             
-            if (flagElement && nameElement) {
-                flagElement.textContent = getFlagEmoji(lang);
-                
-                // 获取语言名称
-                const langNames = {
-                    'zh': '简体中文',
-                    'zh-tw': '繁體中文', 
-                    'en': 'English',
-                    'fr': 'Français',
-                    'de': 'Deutsch',
-                    'es': 'Español',
-                    'ja': '日本語',
-                    'ko': '한국어',
-                    'ru': 'Русский',
-                    'pt': 'Português'
+            if (nameElement) {
+                const langNames = window.LANGUAGE_CONFIG || {
+                    'zh': { name: '简体中文' },
+                    'zh-tw': { name: '繁體中文' },
+                    'en': { name: 'English' },
+                    'fr': { name: 'Français' },
+                    'de': { name: 'Deutsch' },
+                    'es': { name: 'Español' },
+                    'ja': { name: '日本語' },
+                    'ko': { name: '한국어' },
+                    'ru': { name: 'Русский' },
+                    'pt': { name: 'Português' }
                 };
-                nameElement.textContent = langNames[lang] || '简体中文';
+                const currentLang = lang && langNames[lang] ? lang : 'zh';
+                const langConfig = langNames[currentLang] || { name: '简体中文' };
+                nameElement.textContent = langConfig.name;
             }
             
             // 更新语言选项的激活状态
@@ -909,22 +896,6 @@
                     option.classList.add('active');
                 }
             });
-        }
-        
-        function getFlagEmoji(lang) {
-            const flagMap = {
-                'zh': '🇨🇳',
-                'zh-tw': '🇹🇼',
-                'en': '🇺🇸',
-                'fr': '🇫🇷',
-                'de': '🇩🇪',
-                'es': '🇪🇸',
-                'ja': '🇯🇵',
-                'ko': '🇰🇷',
-                'ru': '🇷🇺',
-                'pt': '🇵🇹'
-            };
-            return flagMap[lang] || '🌐';
         }
         
         // 语言下拉菜单状态

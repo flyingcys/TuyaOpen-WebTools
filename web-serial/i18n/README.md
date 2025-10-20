@@ -135,10 +135,9 @@ const availableLangs = i18nLoader.getAvailableLanguages();
 
 4. **更新HTML语言选项**
    ```html
-   <div class="lang-option" data-lang="fr">
-       <span class="lang-flag">🇫🇷</span>
-       <span class="lang-name">Français</span>
-   </div>
+<div class="lang-option" data-lang="fr">
+    <span class="lang-name">Français</span>
+</div>
    ```
 
 ### 翻译规范

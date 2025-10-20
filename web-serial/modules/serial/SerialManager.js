@@ -257,6 +257,13 @@ class SerialManager {
             // 打开串口
             await this.flashPort.open(initialOptions);
 
+            // 确保设备退出复位状态，避免部分系统默认拉低DTR
+            try {
+                await this.flashPort.setSignals({ dataTerminalReady: true, requestToSend: false });
+            } catch (signalError) {
+                console.warn('设置串口信号失败，可能设备不支持:', signalError?.message || signalError);
+            }
+
             // 设置读写器
             this.flashReader = this.flashPort.readable.getReader();
             this.flashWriter = this.flashPort.writable.getWriter();
@@ -339,6 +346,12 @@ class SerialManager {
 
             // 打开串口
             await this.flashPort.open(initialOptions);
+
+            try {
+                await this.flashPort.setSignals({ dataTerminalReady: true, requestToSend: false });
+            } catch (signalError) {
+                console.warn('设置串口信号失败，可能设备不支持:', signalError?.message || signalError);
+            }
 
             // 设置读写器
             this.flashReader = this.flashPort.readable.getReader();
@@ -433,7 +446,13 @@ class SerialManager {
                     stopBits: 1,
                     parity: 'none'
                 });
-                
+
+                try {
+                    await this.flashPort.setSignals({ dataTerminalReady: true, requestToSend: false });
+                } catch (signalError) {
+                    console.warn('设置串口信号失败，可能设备不支持:', signalError?.message || signalError);
+                }
+
                 // 重新创建reader和writer
                 this.flashReader = this.flashPort.readable.getReader();
                 this.flashWriter = this.flashPort.writable.getWriter();

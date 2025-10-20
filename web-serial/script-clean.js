@@ -179,7 +179,6 @@ class SerialTerminal {
         this.langDropdown = document.getElementById('langDropdown');
         this.langDropdownBtn = document.getElementById('langDropdownBtn');
         this.langDropdownMenu = document.getElementById('langDropdownMenu');
-        this.currentLangFlag = document.getElementById('currentLangFlag');
         this.currentLangName = document.getElementById('currentLangName');
 
         // 全屏相关元素
@@ -2659,17 +2658,17 @@ class SerialTerminal {
             return;
         }
         
-        const langData = {
-            'zh': { flag: '🇨🇳', name: '简体中文' },
-            'zh-tw': { flag: '🇹🇼', name: '繁體中文' },
-            'en': { flag: '🇺🇸', name: 'English' },
-            'fr': { flag: '🇫🇷', name: 'Français' },
-            'de': { flag: '🇩🇪', name: 'Deutsch' },
-            'es': { flag: '🇪🇸', name: 'Español' },
-            'ja': { flag: '🇯🇵', name: '日本語' },
-            'ko': { flag: '🇰🇷', name: '한국어' },
-            'ru': { flag: '🇷🇺', name: 'Русский' },
-            'pt': { flag: '🇵🇹', name: 'Português' }
+        const langData = window.LANGUAGE_CONFIG || {
+            'zh': { name: '简体中文' },
+            'zh-tw': { name: '繁體中文' },
+            'en': { name: 'English' },
+            'fr': { name: 'Français' },
+            'de': { name: 'Deutsch' },
+            'es': { name: 'Español' },
+            'ja': { name: '日本語' },
+            'ko': { name: '한국어' },
+            'ru': { name: 'Русский' },
+            'pt': { name: 'Português' }
         };
         
         const currentLangData = langData[currentLang];
@@ -2679,9 +2678,6 @@ class SerialTerminal {
         }
         
         // 更新当前显示的语言
-        if (this.currentLangFlag) {
-            this.currentLangFlag.textContent = currentLangData.flag;
-        }
         if (this.currentLangName) {
             this.currentLangName.textContent = currentLangData.name;
         }

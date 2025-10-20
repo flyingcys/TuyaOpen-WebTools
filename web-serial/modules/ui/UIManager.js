@@ -92,7 +92,6 @@ class UIManager {
         this.elements.langDropdown = document.getElementById('langDropdown');
         this.elements.langDropdownBtn = document.getElementById('langDropdownBtn');
         this.elements.langDropdownMenu = document.getElementById('langDropdownMenu');
-        this.elements.currentLangFlag = document.getElementById('currentLangFlag');
         this.elements.currentLangName = document.getElementById('currentLangName');
     }
     

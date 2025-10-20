@@ -58,16 +58,16 @@ window.ANSI_BG_COLORS = {
 
 // 语言数据配置
 window.LANGUAGE_CONFIG = {
-    'zh': { flag: '🇨🇳', name: '简体中文' },
-    'zh-tw': { flag: '🇹🇼', name: '繁體中文' },
-    'en': { flag: '🇺🇸', name: 'English' },
-    'fr': { flag: '🇫🇷', name: 'Français' },
-    'de': { flag: '🇩🇪', name: 'Deutsch' },
-    'es': { flag: '🇪🇸', name: 'Español' },
-    'ja': { flag: '🇯🇵', name: '日本語' },
-    'ko': { flag: '🇰🇷', name: '한국어' },
-    'ru': { flag: '🇷🇺', name: 'Русский' },
-    'pt': { flag: '🇵🇹', name: 'Português' }
+    'zh': { name: '简体中文' },
+    'zh-tw': { name: '繁體中文' },
+    'en': { name: 'English' },
+    'fr': { name: 'Français' },
+    'de': { name: 'Deutsch' },
+    'es': { name: 'Español' },
+    'ja': { name: '日本語' },
+    'ko': { name: '한국어' },
+    'ru': { name: 'Русский' },
+    'pt': { name: 'Português' }
 };
 
 // 应用配置
